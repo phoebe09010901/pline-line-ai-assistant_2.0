@@ -1,0 +1,113 @@
+{
+  "name": "PLine｜菲比 LINE 智能助理｜V2.0",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pline-v2-0-test",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "22441ef9-8314-479a-953f-5c6f46946ff5",
+      "name": "Webhook",
+      "webhookId": "74c24d6b-8ecf-494d-b710-926214304ccd"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": true,\n  \"version\": \"V2.0\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        208,
+        0
+      ],
+      "id": "51305c41-6e3d-4f91-a295-19f95ee9b9c4",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst text = input.body?.text ?? input.text ?? \"\";\nconst now = new Date();\nconst parts = Object.fromEntries(new Intl.DateTimeFormat(\"en-CA\", { timeZone: \"Asia/Taipei\", year: \"numeric\", month: \"2-digit\", day: \"2-digit\", hour: \"2-digit\", minute: \"2-digit\", second: \"2-digit\", hourCycle: \"h23\" }).formatToParts(now).filter(p => p.type !== \"literal\").map(p => [p.type, p.value]));\nconst created_at = parts.year + \"-\" + parts.month + \"-\" + parts.day + \"T\" + parts.hour + \":\" + parts.minute + \":\" + parts.second + \"+08:00\";\nconst filename = \"idea_\" + parts.year + \"-\" + parts.month + \"-\" + parts.day + \"_\" + parts.hour + \"-\" + parts.minute + \"-\" + parts.second + \".json\";\nconst document = { text, created_at, source: \"LINE\", project: \"菲比 LINE 智能助理_02\", version: \"V2.0\" };\nconst binary = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(document, null, 2), \"utf8\"), filename, \"application/json\");\nreturn [{ json: document, binary: { data: binary } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        192
+      ],
+      "id": "39b9d8d0-df4a-4f24-a957-377a62439c42",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "path": "=/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST/{{$binary.data.fileName}}",
+        "binaryData": true
+      },
+      "type": "n8n-nodes-base.dropbox",
+      "typeVersion": 1,
+      "position": [
+        432,
+        192
+      ],
+      "id": "37638102-760c-4915-97d6-76b6cf2e7f1b",
+      "name": "Upload a file"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "7f8786ab-1afd-4318-82a1-e7ec4a7dcc7b",
+  "meta": {
+    "instanceId": "d37e7cedf643aa2462ef5e1a0cfd01419dd38c58ae39e150f90befdd242f2cbd"
+  },
+  "nodeGroups": [],
+  "id": "X1yl5OAKtZE2B24i",
+  "tags": []
+}

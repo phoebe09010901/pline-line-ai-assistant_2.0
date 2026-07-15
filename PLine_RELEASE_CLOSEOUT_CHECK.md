@@ -6,7 +6,7 @@
 
 ## 本次檢查範圍
 
-本次檢查 `菲比 LINE 智能助理_02` 的 V2.0 TEST baseline。
+本次檢查 `菲比 LINE 智能助理_02` 的 V2.0 TEST Dropbox baseline。
 
 第一階段目標：
 
@@ -27,17 +27,19 @@ LINE Reply API 回覆
 ### 已完成
 
 - LINE → Worker：PASS。
+- LINE Webhook：PASS。
 - Worker → n8n V2.0：PASS。
+- n8n → TEST Dropbox JSON：PASS。
 - n8n HTTP response：`200`。
 - LINE Reply `記好了 ✨`：PASS。
-- n8n workflow 已匯出到 `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json`。
-- `BASELINE.md` 已建立。
-- baseline 匯出檔已檢查，未包含 token、secret、credentials。
+- duplicate JSON = 0。
+- duplicate reply = 0。
+- n8n workflow 已匯出到 `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json`。
+- `BASELINE.md` 已更新。
+- Dropbox baseline 匯出檔已清除 credentials metadata，已檢查未包含 token、secret、credentials。
 
 ### 尚未完成
 
-- 尚未加入 Dropbox。
-- 尚未加入 JSON 儲存。
 - 尚未加入 AI 分析。
 - 尚未允許 FORMAL。
 
@@ -47,13 +49,13 @@ LINE Reply API 回覆
 
 ### 目前判定
 
-`TEST_BASELINE_PASS`
+`TEST_DROPBOX_BASELINE_PASS`
 
 ### 判定原因
 
 目前只代表 TEST baseline 可作為後續正式開發基準。
 
-這不代表 FORMAL 上線，也不代表可加入 Dropbox、JSON、AI 或其他新功能。
+這不代表 FORMAL 上線，也不代表可加入 AI 或其他新功能。
 
 ---
 
@@ -74,8 +76,6 @@ LINE Reply API 回覆
 
 - FORMAL 上線。
 - n8n 串接。
-- Dropbox 串接。
-- JSON 儲存。
 - AI 分析。
 - 自然語言分類。
 - Codex 派工。
@@ -87,15 +87,18 @@ LINE Reply API 回覆
 
 `PLine｜RELEASE｜階段收尾與上線檢查` 本輪完成。
 
-V2.0 TEST baseline 已保存，但 FORMAL 仍不允許。
+V2.0 TEST Dropbox baseline 已保存，但 FORMAL 仍不允許。
 
 目前狀態：
 
 ```text
-RELEASE_CLOSEOUT_STATUS=baseline_created
-LAUNCH_DECISION=TEST_BASELINE_PASS_FORMAL_NO_GO
+RELEASE_CLOSEOUT_STATUS=dropbox_baseline_created
+LAUNCH_DECISION=TEST_DROPBOX_BASELINE_PASS_FORMAL_NO_GO
 LIVE_TEST_STATUS=passed
 FORMAL_ALLOWED=false
-BASELINE_FILE=n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json
+BASELINE_FILE=n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json
+N8N_TO_TEST_DROPBOX_JSON=passed
+DUPLICATE_JSON=0
+DUPLICATE_REPLY=0
 NEXT_REQUIRED_PROOF=任何新功能必須另行派工並重新測試
 ```

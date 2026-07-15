@@ -180,11 +180,53 @@ FORMAL_ALLOWED=false
 - LINE Reply `記好了 ✨`：PASS
 - n8n workflow 匯出檔未包含 token、secret、credentials
 
-仍未加入：
+當時仍未加入：
 
 - Dropbox
 - JSON 儲存
 - AI 分析
+
+---
+
+## 2026-07-16｜V2.0 Dropbox baseline 保存
+
+紀錄檔：
+
+```text
+BASELINE.md
+n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json
+```
+
+目前判定：
+
+```text
+BASELINE_STATUS=dropbox_baseline_created
+LINE_WEBHOOK=passed
+WORKER_TO_N8N_V2_0=passed
+N8N_TO_TEST_DROPBOX_JSON=passed
+LINE_REPLY_FIXED_TEXT=passed
+DUPLICATE_JSON=0
+DUPLICATE_REPLY=0
+FORMAL_ALLOWED=false
+```
+
+結論：
+
+已將目前 TEST Dropbox 成功版本保存為正式開發基準。
+
+已確認：
+
+- LINE Webhook：PASS
+- LINE Reply `記好了 ✨`：PASS
+- Worker → n8n V2.0：PASS
+- n8n → TEST Dropbox JSON：PASS
+- n8n workflow 匯出檔已清除 credentials metadata，未包含 token、secret、credentials
+
+仍未加入：
+
+- AI 分析
+- 自然語言分類
+- Codex 派工
 
 ---
 
@@ -207,4 +249,4 @@ FORMAL_ALLOWED=false
 
 下一步必須由 `PLine｜00｜總控制台` 另行派工，且一次只新增一個功能。
 
-不得直接修改 baseline，不得碰 FORMAL，不得把 Dropbox、JSON、AI 混入同一輪。
+不得直接修改 baseline，不得碰 FORMAL，不得把多個新功能混入同一輪。

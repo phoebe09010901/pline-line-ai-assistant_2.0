@@ -6,7 +6,7 @@
 
 ## Baseline 名稱
 
-`v2.0-line-n8n-baseline`
+`v2.0-line-n8n-dropbox-baseline`
 
 本 baseline 保存目前已通過的 TEST 主流程：
 
@@ -14,6 +14,7 @@
 LINE
 → Worker
 → n8n V2.0
+→ TEST Dropbox JSON
 → LINE Reply「記好了 ✨」
 ```
 
@@ -21,11 +22,14 @@ LINE
 
 ## PASS 證據
 
-- LINE → Worker：PASS
+- LINE Webhook：PASS
 - Worker → n8n V2.0：PASS
+- n8n → TEST Dropbox JSON：PASS
 - n8n HTTP response：`200`
 - LINE Reply `記好了 ✨`：PASS
 - LINE「菲比智能客服 測試」已收到 `記好了 ✨`
+- duplicate JSON = 0
+- duplicate reply = 0
 
 ---
 
@@ -34,15 +38,21 @@ LINE
 - Worker 名稱：`pline-v2-0-test-line-gateway-r2c3b`
 - Worker 檔案：`workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
 - n8n workflow 名稱：`PLine｜菲比 LINE 智能助理｜V2.0`
-- n8n workflow 匯出檔：`n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json`
-- n8n workflow 匯出狀態：已檢查，未包含 token、secret、credentials
+- n8n workflow 匯出檔：`n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json`
+- n8n workflow 匯出狀態：已清除 credentials metadata，已檢查未包含 token、secret、credentials
+- TEST Dropbox 固定路徑：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- Dropbox 檔名格式：`idea_YYYY-MM-DD_HH-mm-ss.json`
+
+---
+
+## 本 baseline 已加入
+
+- TEST Dropbox JSON 寫入
 
 ---
 
 ## 尚未加入
 
-- Dropbox
-- JSON 儲存
 - AI 分析
 - 自然語言分類
 - Codex 派工
@@ -67,11 +77,17 @@ LINE
 
 ```text
 BASELINE_STATUS=created
+LINE_WEBHOOK=passed
 LINE_TO_WORKER=passed
 WORKER_TO_N8N_V2_0=passed
+N8N_TO_TEST_DROPBOX_JSON=passed
 LINE_REPLY_FIXED_TEXT=passed
+DROPBOX_PATH=/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST
+DROPBOX_FILENAME=idea_YYYY-MM-DD_HH-mm-ss.json
+DUPLICATE_JSON=0
+DUPLICATE_REPLY=0
 FORMAL_ALLOWED=false
-DROPBOX_ADDED=false
-JSON_STORAGE_ADDED=false
+DROPBOX_ADDED=true
+JSON_STORAGE_ADDED=true
 AI_ADDED=false
 ```

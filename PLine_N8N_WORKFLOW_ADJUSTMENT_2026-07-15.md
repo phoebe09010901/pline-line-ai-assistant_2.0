@@ -207,3 +207,41 @@ FORMAL_ALLOWED=false
 PLine｜N8N V2.0 BASELINE_STATUS: exported
 
 ORCHESTRATOR_NOTIFY: yes
+
+---
+
+# 追加：V2.0 Dropbox baseline 匯出
+
+日期：2026-07-16
+
+來源：`PLine｜RELEASE｜階段收尾與上線檢查`
+
+目前最新 Dropbox baseline 以以下檔案為準：
+
+```text
+n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json
+```
+
+目前狀態：
+
+```text
+LINE_WEBHOOK=passed
+WORKER_TO_N8N_V2_0=passed
+N8N_TO_TEST_DROPBOX_JSON=passed
+LINE_REPLY_FIXED_TEXT=passed
+DUPLICATE_JSON=0
+DUPLICATE_REPLY=0
+FORMAL_ALLOWED=false
+```
+
+邊界：
+
+- Dropbox baseline 匯出檔已清除 credentials metadata，已檢查未包含 token、secret、credentials
+- 未加入 AI 分析
+- 未碰 FORMAL
+- 未修改舊專案 `/Users/phoebe/Documents/菲比 LINE 智能助理`
+- 未 push
+
+PLine｜N8N V2.0 DROPBOX_BASELINE_STATUS: exported
+
+ORCHESTRATOR_NOTIFY: yes

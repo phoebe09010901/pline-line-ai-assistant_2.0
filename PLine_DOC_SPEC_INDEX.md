@@ -25,11 +25,12 @@
 
 | 文件 | 狀態 | 說明 |
 | --- | --- | --- |
-| `BASELINE.md` | active | V2.0 LINE → Worker → n8n 成功基準 |
+| `BASELINE.md` | active | V2.0 LINE → Worker → n8n → TEST Dropbox 成功基準 |
 | `README.md` | active | 專案入口與目前 baseline 摘要 |
 | `PROJECT_STATE.md` | active | 專案狀態、目標、邊界、固定 Threads |
 | `PLine_PHASE1_MINIMAL_REPLY_SPEC.md` | active | 第一階段最小 Reply API 驗收規格 |
 | `PLine_N8N_WORKFLOW_ADJUSTMENT_2026-07-15.md` | referenced | n8n 延後到第二階段的判定紀錄 |
+| `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json` | active | 已通過的 n8n V2.0 Dropbox baseline 匯出 |
 | `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json` | active | 已通過的 n8n V2.0 baseline 匯出 |
 | `n8n/PLine_V2_0_workflow_skeleton.json` | historical | 2026-07-15 歷史 skeleton，不是目前 baseline |
 | `n8n/README.md` | active | V2.0 workflow 與 baseline 狀態 |
@@ -54,9 +55,9 @@ LINE text message
 
 成功條件以真實 TEST LINE 收到回覆為準。
 
-2026-07-16 已通過 V2.0 TEST baseline：LINE → Worker → n8n V2.0 → LINE Reply `記好了 ✨`。
+2026-07-16 已通過 V2.0 TEST Dropbox baseline：LINE → Worker → n8n V2.0 → TEST Dropbox JSON，且 LINE Reply `記好了 ✨` 仍 PASS。
 
-目前 baseline 僅代表 TEST 主流程可作為正式開發基準；FORMAL 仍不允許，Dropbox、JSON、AI 仍未加入。
+目前 baseline 僅代表 TEST 主流程可作為正式開發基準；FORMAL 仍不允許，AI 仍未加入。
 
 ---
 
@@ -78,4 +79,4 @@ LINE text message
 
 交給 `PLine｜00｜總控制台` 決定 baseline 後的下一個單一功能。
 
-不得直接修改 baseline，不得碰 FORMAL，不得在同一輪加入 Dropbox、JSON、AI。
+不得直接修改 baseline，不得碰 FORMAL，不得在同一輪加入多個新功能。
