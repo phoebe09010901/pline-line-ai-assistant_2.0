@@ -40,6 +40,7 @@
 - Worker → n8n V2.0
 - n8n HTTP 200
 - TEST Dropbox JSON 寫入
+- 日／月／年查詢分流
 - LINE Reply：`記好了 ✨`
 
 新增功能時，必須優先使用：
@@ -75,8 +76,8 @@
 2. LINE 回覆 `記好了 ✨`：PASS
 3. n8n 收到文字：PASS
 4. Dropbox 寫入 JSON：PASS
-5. 自然語言記錄想法
-6. 依日／月／年查詢與統計
+5. 自然語言記錄想法：PASS
+6. 依日／月／年查詢與統計：月／年查詢 PASS，日查詢 action 已完成
 7. 後續 Codex 派工能力
 
 在以上主要功能未全部暢通前，不得因以下項目阻塞主線：
@@ -180,6 +181,39 @@ LINE「菲比智能客服 測試」
 
 ---
 
+# 日／月／年查詢功能
+
+FIX worker 已完成查詢功能並 PASS。
+
+`local-query-api` 六個 action：
+
+- `count_day`
+- `list_day`
+- `count_month`
+- `list_month`
+- `count_year`
+- `list_year`
+
+目前結果：
+
+- 本機 HTTP 200
+- 同一 HTTPS tunnel HTTP 200
+- 固定 Dropbox 路徑：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- Worker 直接查詢分流
+- 非查詢文字仍走 n8n 記錄流程
+- 本月 LINE 查詢 PASS，數量 4
+- 今年 LINE 查詢 PASS，數量 4
+- 四項 LINE 查詢 PASS：本月數量、本月列表、本年數量、本年列表
+- 查詢新增 JSON = 0
+- 記錄測試收到 `記好了 ✨`，新增 JSON = 1
+- duplicate JSON = 0
+- duplicate reply = 0
+- Worker URL / name unchanged
+- n8n workflow unchanged
+- n8n、舊專案、FORMAL、LINE Webhook 未修改
+
+---
+
 # V2.0 Baseline
 
 2026-07-16 已保存目前成功版本為正式開發基準。
@@ -212,6 +246,10 @@ baseline 必須保持：
 - 未寫入或顯示 token、secret、credentials
 - duplicate JSON = 0
 - duplicate reply = 0
+- 查詢新增 JSON = 0
+- 記錄測試新增 JSON = 1
+- Worker URL / name unchanged
+- n8n workflow unchanged
 - baseline commit / tag 由 RELEASE thread 建立
 - 未 push
 

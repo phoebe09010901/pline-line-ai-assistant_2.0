@@ -4,6 +4,47 @@
 
 ## 2026-07-16
 
+### 日／月／年查詢功能 PASS
+
+FIX worker 已完成查詢功能並 PASS。
+
+已完成的 `local-query-api` actions：
+
+- `count_day`
+- `list_day`
+- `count_month`
+- `list_month`
+- `count_year`
+- `list_year`
+
+測試結果：
+
+- 本機 HTTP 200
+- 同一 HTTPS tunnel HTTP 200
+- 固定 Dropbox 路徑：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- Worker 直接查詢分流，非查詢文字仍走 n8n 記錄流程
+- 本月 LINE 查詢 PASS，數量 4
+- 今年 LINE 查詢 PASS，數量 4
+- 四項 LINE 查詢 PASS：本月數量、本月列表、本年數量、本年列表
+- 查詢新增 JSON = 0
+- 記錄測試收到 `記好了 ✨`，新增 JSON = 1
+- duplicate JSON = 0
+- duplicate reply = 0
+
+邊界：
+
+- Worker URL / name unchanged
+- n8n workflow unchanged
+- n8n 未修改
+- Worker 未修改
+- `local-query-api` 未修改
+- 舊專案未修改
+- FORMAL 未操作
+- LINE Webhook 未修改
+- 未 commit / push
+
+---
+
 ### TEST Dropbox JSON 寫入 PASS
 
 本階段已 PASS：
@@ -41,6 +82,7 @@ LINE「菲比智能客服 測試」
 - Worker → n8n V2.0
 - n8n HTTP 200
 - TEST Dropbox JSON 寫入
+- 日／月／年查詢分流
 - LINE Reply：`記好了 ✨`
 
 原則：
@@ -56,8 +98,8 @@ LINE「菲比智能客服 測試」
 2. LINE 回覆 `記好了 ✨`：PASS
 3. n8n 收到文字：PASS
 4. Dropbox 寫入 JSON：PASS
-5. 自然語言記錄想法
-6. 依日／月／年查詢與統計
+5. 自然語言記錄想法：PASS
+6. 依日／月／年查詢與統計：月／年查詢 PASS，日查詢 action 已完成
 7. 後續 Codex 派工能力
 
 在主要功能未全部暢通前，額外 Gate、preflight、diagnostic、review、recovery、evidence、handoff、cleanup、root cause、baseline lock、arm helper、session lifecycle、terminal ACK、forward settlement、多層 authorization、額外安全審查、完整測試框架、複雜狀態機，統一記錄為：
