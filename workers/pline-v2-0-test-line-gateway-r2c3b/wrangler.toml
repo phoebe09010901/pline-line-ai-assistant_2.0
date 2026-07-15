@@ -1,0 +1,4 @@
+name = "pline-v2-0-test-line-gateway-r2c3b"
+main = "src/index.js"
+compatibility_date = "2026-07-15"
+workers_dev = true

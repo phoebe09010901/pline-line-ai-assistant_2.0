@@ -1,0 +1,64 @@
+{
+  "name": "PLine｜菲比 LINE 智能助理｜V2.0",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pline-v2-0-test",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "22441ef9-8314-479a-953f-5c6f46946ff5",
+      "name": "Webhook",
+      "webhookId": "74c24d6b-8ecf-494d-b710-926214304ccd"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": true,\n  \"version\": \"V2.0\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        208,
+        0
+      ],
+      "id": "51305c41-6e3d-4f91-a295-19f95ee9b9c4",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "784a484c-be0c-424d-a302-35aafaea6ff6",
+  "meta": {
+    "instanceId": "d37e7cedf643aa2462ef5e1a0cfd01419dd38c58ae39e150f90befdd242f2cbd"
+  },
+  "nodeGroups": [],
+  "id": "X1yl5OAKtZE2B24i",
+  "tags": []
+}

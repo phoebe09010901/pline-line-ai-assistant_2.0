@@ -1,0 +1,47 @@
+{
+  "name": "PLine｜菲比 LINE 智能助理｜V2.0",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "pline-v2-0-manual-trigger",
+      "name": "Manual Trigger｜V2.0 skeleton only",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "PLine V2.0 skeleton only\n\n- Not connected to LINE\n- No Dropbox\n- No JSON storage\n- No AI analysis\n- No natural language classification\n- TEST boundary only\n- Keep inactive until the next explicit task"
+      },
+      "id": "pline-v2-0-boundary-note",
+      "name": "Boundary Note｜V2.0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        260,
+        -120
+      ]
+    }
+  ],
+  "connections": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "PLine"
+    },
+    {
+      "name": "V2.0"
+    },
+    {
+      "name": "TEST"
+    }
+  ]
+}
