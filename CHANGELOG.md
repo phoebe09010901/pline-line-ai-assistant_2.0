@@ -22,6 +22,21 @@ V3.0 Codex LINE Inbox 已完成 RELEASE，但本次只保存 receive-only checkp
 - 不描述為 V3 全流程完成
 - 本輪尚未修正 monitor、Worker、local-query-api、n8n
 
+明日唯一主線：
+
+- 查明真實 LINE 任務停點
+- 確認 remote task 狀態為 pending / processing / completed / failed 的哪一層
+- 確認 Codex monitor 是否真正常駐
+- 只修真正故障層
+- 完成單筆 `LINE → Codex → 工具執行 → LINE 第二段結果`
+
+目前不得誤標 PASS：
+
+- Codex monitor 是否真正常駐
+- Codex 是否實際執行
+- Codex 是否使用工具完成任務
+- LINE 第二段最終結果回覆
+
 ---
 
 ### V3 mainline｜Codex LINE inbox foundation PASS
