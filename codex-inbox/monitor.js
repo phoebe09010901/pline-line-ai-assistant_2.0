@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +14,28 @@ const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-t
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
+
+function runCodex(args, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("/opt/homebrew/bin/codex", args, { cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+      reject(new Error("Codex execution timed out"));
+    }, options.timeout);
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(`Codex exited ${code ?? signal}: ${stderr.trim().slice(-300)}`));
+    });
+    child.stdin.end();
+  });
+}
 
 async function ensureFolders() {
   for (const folder of folders) await fs.mkdir(path.join(ROOT, folder), { recursive: true });
@@ -99,10 +121,10 @@ async function executeWithCodex(task) {
   ].join("\n");
   const outputFile = path.join("/tmp", `pline-codex-${String(task.task_id).replace(/[^A-Za-z0-9_-]/g, "_")}.last`);
   await fs.rm(outputFile, { force: true });
-  const { stdout, stderr } = await execFileAsync("/opt/homebrew/bin/codex", [
+  const { stdout, stderr } = await runCodex([
     "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "danger-full-access", "-c", "model_reasoning_effort=low", "--cd", PROJECT_ROOT,
     "--add-dir", DROPBOX_DIR, "-o", outputFile, prompt,
-  ], { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
+  ], { cwd: PROJECT_ROOT, timeout: 120_000 });
   const lastMessage = await fs.readFile(outputFile, "utf8").catch(() => "");
   await fs.rm(outputFile, { force: true });
   const summary = (lastMessage.trim() || stdout.trim()).split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 500);
