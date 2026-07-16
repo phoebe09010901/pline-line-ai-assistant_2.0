@@ -4,6 +4,89 @@
 
 ## 2026-07-16
 
+### DOC｜V3.3 offline queue recovery 狀態整理
+
+本輪 `PLine｜DOC｜文件與規格整理` 更新 V3.3 真實驗收狀態，並明確標示即時 wake 未證實 / 未配置。
+
+更新文件：
+
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+- `CODEX_NOTES.md`
+- `BASELINE.md`
+
+上游 TEST：
+
+- TEST thread id：`019f6940-ff63-7392-8dab-d285f4f44928`
+- TEST turn id：`019f6a69-4d16-7601-92e7-8d7428755e0d`
+- WORKER_STATUS：completed
+- V3.3 真實 LINE 驗收結果：PASS
+- 即時 wake endpoint / 秒級事件驅動 wake 不可標 PASS
+- 原因：`CODEX_MONITOR_WAKE_URL` 未配置，任務實際走 `missing_wake_url` / fallback poll / monitor recovery
+
+可標 PASS：
+
+- LINE ACK 可見
+- online 列表第二段 final 可見
+- online heartbeat metadata 有記錄
+- offline queued 有記錄
+- monitor recovery 有記錄
+- recovery progress push 已送出
+- final push 已送出
+- duplicate task / execution / ACK / final push = 0
+
+不可標 PASS：
+
+- 即時 wake endpoint
+- 秒級事件驅動 wake
+- 正式 LINE / 正式 Cloudflare / n8n / FORMAL 切換
+
+online 列表驗收：
+
+- 訊息時間：`2026-07-16 18:15`
+- LINE 訊息：`列出本月想法 V33ON1815`
+- task：`01KXN6S8CCWKM5J19X8RQD7V6X`
+- display：`P-NCSBNC-0AZ2`
+- 路徑：pending → processing → completed
+- heartbeat：enqueue 時 `state=online`, `online=true`, `busy=false`, `monitor_version=V3.3`
+- wake：`wake_status=skipped`, `wake_skip_reason=missing_wake_url`
+- timing：received `18:15:32`, claimed `18:15:48`, completed `18:16:47`, final push `18:16:52`
+- LINE：ACK 可見；第二段 final 可見，列出本月 19 則想法
+- execution：`attempts=1`, `final_push_status=sent`, HTTP 200
+
+offline queue / recovery 驗收：
+
+- 訊息時間：`2026-07-16 18:20`
+- LINE 訊息：`我想看這19則想法 V33OFF1819`
+- task：`01KXN729ADVBMF3MDW5DR2QQKH`
+- display：`P-NCYNY8-0H44`
+- 目前位置：`completed/01KXN729ADVBMF3MDW5DR2QQKH.json`
+- queued evidence：`queued_while_offline=true`, `queued_at=18:20:27`
+- offline snapshot：enqueue 時 `state=stale`, `online=false`, `age_ms=130785`
+- wake：`wake_status=not_attempted`, `wake_skip_reason=executor_offline_or_unknown`
+- monitor recovery：monitor 恢復後 PID `22710`，`claimed_at=18:21:47`
+- execution：`attempts=1`, duplicate execution = 0
+- recovery push：`recovery_progress_push_status=sent`, HTTP 200
+- final push：`final_push_status=sent`, HTTP 200，`final_push_at=18:22:52`
+- LINE：離線 ACK、恢復通知、第二段 final 皆在 TEST LINE 畫面可見
+
+收斂與安全：
+
+- KV / inbox 收斂：pending=0、processing=0、completed=28、failed=17
+- monitor heartbeat：`status=online`, `monitor_version=V3.3`, `current_task_id=null`
+- duplicate task / execution / ACK / final push：0
+- 對外訊息安全：未見 Codex / monitor / Worker / Gateway / task_id / PID / stdout / stderr / local path
+
+阿光對外人格規格仍維持：LINE 對菲比用第一人稱「我」。不得把「交給 Codex」寫成對菲比顯示文案；技術紀錄可使用 Codex / monitor / Worker / Gateway 等名稱。
+
+邊界：
+
+- 本輪是 TEST LINE / 測試 Worker 驗收
+- 本輪未切換正式 LINE、正式 Cloudflare、n8n 或 FORMAL
+- 本輪 DOC 未修改程式碼、未部署、未 commit、未 push
+
+---
+
 ### DOC｜阿光事件驅動即時喚醒規格與 RELEASE 驗收
 
 本輪 `PLine｜DOC｜文件與規格整理` 記錄阿光事件驅動即時喚醒規格與 RELEASE 驗收結果。

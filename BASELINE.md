@@ -4,9 +4,76 @@
 
 ---
 
-## V3.1 mainline baseline note
+## V3.3 mainline baseline note
 
-本輪文件結論以 V3.1 阿光統一人格與自然任務回覆基準為準，不以舊 V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+本輪文件結論以 V3.3 TEST LINE 真實驗收為準，不以舊 V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+
+### V3.3 baseline caveat
+
+V3.3 真實 LINE 驗收結果：PASS；但即時 wake endpoint / 秒級事件驅動 wake 不可標 PASS。
+
+原因：`CODEX_MONITOR_WAKE_URL` 未配置，任務實際走 `missing_wake_url` / fallback poll / monitor recovery。
+
+可列入目前 V3.3 基準：
+
+- LINE ACK 可見
+- online 列表第二段 final 可見
+- online heartbeat metadata 有記錄
+- offline queued 有記錄
+- monitor recovery 有記錄
+- recovery progress push 已送出
+- final push 已送出
+- duplicate task / execution / ACK / final push = 0
+
+不可列入目前 V3.3 基準：
+
+- 即時 wake endpoint
+- 秒級事件驅動 wake
+- 正式 LINE / 正式 Cloudflare / n8n / FORMAL 切換
+
+### V3.3 online 列表驗收
+
+- 訊息時間：`2026-07-16 18:15`
+- LINE 訊息：`列出本月想法 V33ON1815`
+- task：`01KXN6S8CCWKM5J19X8RQD7V6X`
+- display：`P-NCSBNC-0AZ2`
+- 路徑：pending → processing → completed
+- heartbeat：enqueue 時 `state=online`, `online=true`, `busy=false`, `monitor_version=V3.3`
+- wake：`wake_status=skipped`, `wake_skip_reason=missing_wake_url`
+- timing：received `18:15:32`, claimed `18:15:48`, completed `18:16:47`, final push `18:16:52`
+- LINE：ACK 可見；第二段 final 可見，列出本月 19 則想法
+- execution：`attempts=1`, `final_push_status=sent`, HTTP 200
+
+### V3.3 offline queue / recovery 驗收
+
+- 訊息時間：`2026-07-16 18:20`
+- LINE 訊息：`我想看這19則想法 V33OFF1819`
+- task：`01KXN729ADVBMF3MDW5DR2QQKH`
+- display：`P-NCYNY8-0H44`
+- 目前位置：`completed/01KXN729ADVBMF3MDW5DR2QQKH.json`
+- queued evidence：`queued_while_offline=true`, `queued_at=18:20:27`
+- offline snapshot：enqueue 時 `state=stale`, `online=false`, `age_ms=130785`
+- wake：`wake_status=not_attempted`, `wake_skip_reason=executor_offline_or_unknown`
+- monitor recovery：monitor 恢復後 PID `22710`，`claimed_at=18:21:47`
+- execution：`attempts=1`, duplicate execution = 0
+- recovery push：`recovery_progress_push_status=sent`, HTTP 200
+- final push：`final_push_status=sent`, HTTP 200，`final_push_at=18:22:52`
+- LINE：離線 ACK、恢復通知、第二段 final 皆在 TEST LINE 畫面可見
+
+### V3.3 inbox 收斂與安全
+
+- KV / inbox 收斂：pending=0、processing=0、completed=28、failed=17
+- monitor heartbeat：`status=online`, `monitor_version=V3.3`, `current_task_id=null`
+- duplicate task / execution / ACK / final push：0
+- 對外訊息安全：未見 Codex / monitor / Worker / Gateway / task_id / PID / stdout / stderr / local path
+
+阿光對外人格規格仍維持：LINE 對菲比用第一人稱「我」。不得把「交給 Codex」寫成對菲比顯示文案；技術紀錄可使用 Codex / monitor / Worker / Gateway 等名稱。
+
+本輪是 TEST LINE / 測試 Worker 驗收；未切換正式 LINE、正式 Cloudflare、n8n 或 FORMAL。
+
+---
+
+## V3.1 history baseline note
 
 ### Baseline 名稱
 
