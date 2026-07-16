@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 const KV_NAMESPACE_ID = process.env.CODEX_INBOX_KV_NAMESPACE_ID || "ba842d5662f94e60bfeb4a85e9f0e36c";
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
+const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
@@ -106,26 +107,20 @@ async function executeWithCodex(task) {
 }
 
 async function pushFinalResult(task, result) {
-  const userId = task.user_id || task.line_user_id;
-  if (!userId) return { pushed: false, reason: "missing_user_id" };
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return { pushed: false, reason: "missing_runtime_binding" };
   const text = typeof result.final_reply === "string" && result.final_reply.trim()
     ? result.final_reply.trim()
     : `已完成：「${task.original_text}」✨`;
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+  const response = await fetch(FINAL_PUSH_URL, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ to: userId, messages: [{ type: "text", text }] }),
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task_id: task.task_id, text }),
   });
-  return { pushed: response.ok, status: response.status };
+  const body = await response.json().catch(() => ({}));
+  return { pushed: response.ok && body.ok === true, status: response.status, reason: body.error };
 }
 
 async function executeAndPush(task) {
-  const result = await executeWithCodex(task);
-  const push = await pushFinalResult(task, result);
-  if (!push.pushed) throw new Error(`Codex completed but final LINE push unavailable: ${push.reason}`);
-  return { ...result, result_summary: `${result.result_summary} LINE push HTTP ${push.status}` };
+  return executeWithCodex(task);
 }
 
 export async function scanKvOnce(handler = executeAndPush) {
@@ -162,6 +157,11 @@ export async function scanKvOnce(handler = executeAndPush) {
       task.result_summary = String(result?.result_summary || "completed").slice(0, 500);
       task.result_status = result?.result_status || "completed";
       if (!(await kvGetOrNull(failedKey))) await kvPut(completedKey, JSON.stringify(task));
+      const push = await pushFinalResult(task, result);
+      task.final_push_status = push.pushed ? "sent" : "failed";
+      task.final_push_http_status = push.status;
+      if (!push.pushed) task.final_push_error = push.reason || "push_failed";
+      await kvPut(completedKey, JSON.stringify(task));
       await kvDelete(processingKey);
     } catch (error) {
       const owner = await kvGetOrNull(processingKey);

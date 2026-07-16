@@ -1,6 +1,7 @@
 const LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply";
 const RECEIVED_REPLY = "收到，已交給 Codex ✨";
 const PROJECT = "菲比 LINE 智能助理_02";
+const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -31,6 +32,7 @@ async function writeInboxTask(event, env) {
     line_event_id: lineEventId,
     text: event.message.text,
     original_text: event.message.text,
+    ...(typeof event.source?.userId === "string" ? { user_id: event.source.userId } : {}),
     source: "LINE",
     status: "pending",
     received_at: taipeiNow(),
@@ -58,7 +60,20 @@ async function replyToLine(event, env) {
 
 export default {
   async fetch(request, env) {
-    if (request.method === "GET") return json({ ok: true, worker: "pline-v2-0-test-line-gateway-r2c3b", version: "V3.0" });
+    if (request.method === "GET") return json({ ok: true, worker: WORKER_NAME, version: "V3.0" });
+    if (request.method === "POST" && new URL(request.url).pathname === "/internal/final-push") {
+      let body;
+      try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
+      const task = body?.task_id && env.CODEX_INBOX ? await env.CODEX_INBOX.get(`completed/${body.task_id}.json`, "json") : null;
+      if (!task?.user_id || typeof body.text !== "string" || !body.text.trim()) return json({ ok: false, error: "missing_task_target" }, 400);
+      if (!env.LINE_CHANNEL_ACCESS_TOKEN) return json({ ok: false, error: "missing_runtime_binding" }, 500);
+      const response = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ to: task.user_id, messages: [{ type: "text", text: body.text }] }),
+      });
+      return json({ ok: response.ok, status: response.status });
+    }
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     let payload;
     try { payload = await request.json(); } catch { return json({ ok: true }); }
