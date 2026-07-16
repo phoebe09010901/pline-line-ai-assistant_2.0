@@ -214,6 +214,43 @@ FIX worker 已完成查詢功能並 PASS。
 
 ---
 
+# 第一版功能完整 PASS
+
+目前第一版功能已 PASS。
+
+已完成：
+
+- LINE 記錄想法與固定回覆
+- Dropbox JSON 寫入
+- 日 / 月 / 年數量與清單
+- 搜尋、查看、修改、刪除
+- 分類記錄直接 Worker → local-query-api → Dropbox
+- 分類搜尋
+- Codex queue pending task
+
+Computer Use 驗收結果：
+
+- TEST LINE：`菲比智能客服 測試`
+- Worker 最終版本：`3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
+- 查詢未送 n8n
+- n8n 僅保留既有成功記錄流程，未新增查詢路由
+- 固定 Dropbox TEST 路徑與 local-query-api 路徑維持文件既有設定
+- 分類測試 JSON：`category=網站`
+- 分類測試 JSON：`text` 已移除 `［網站］`
+- 分類測試 JSON：`original_text` 保留
+- 刪除測試資料已移至 `想法紀錄_TEST_已刪除`
+- Codex queue 測試前 2、測試後 3，新增 1 筆 pending
+- duplicate JSON = 0
+- duplicate reply = 0
+- 舊專案未修改
+- FORMAL 未操作
+
+補充：
+
+先前 TEST 中查詢分類曾失敗，後由 Worker 路由優先順序修正後 PASS。
+
+---
+
 # V2.0 Baseline
 
 2026-07-16 已保存目前成功版本為正式開發基準。
@@ -228,6 +265,9 @@ baseline 必須保持：
 - LINE → Worker PASS
 - Worker → n8n V2.0 PASS
 - n8n → TEST Dropbox JSON PASS
+- 搜尋 / 查看 / 修改 / 刪除 PASS
+- 分類記錄與分類搜尋 PASS
+- Codex queue pending task PASS
 - LINE Reply `記好了 ✨` PASS
 - duplicate JSON = 0
 - duplicate reply = 0
@@ -249,7 +289,9 @@ baseline 必須保持：
 - 查詢新增 JSON = 0
 - 記錄測試新增 JSON = 1
 - Worker URL / name unchanged
+- Worker final version = `3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
 - n8n workflow unchanged
+- 查詢未送 n8n
 - baseline commit / tag 由 RELEASE thread 建立
 - 未 push
 

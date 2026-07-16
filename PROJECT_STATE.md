@@ -119,6 +119,44 @@ FIX worker 已完成日／月／年查詢功能並 PASS。
 
 ---
 
+# 第一版功能完整驗收
+
+目前第一版功能已 PASS。
+
+已完成：
+
+- LINE 記錄想法與固定回覆
+- Dropbox JSON 寫入
+- 日 / 月 / 年數量與清單
+- 搜尋、查看、修改、刪除
+- 分類記錄直接走 Worker → local-query-api → Dropbox
+- 分類搜尋
+- Codex queue pending task
+
+Computer Use 驗收結果：
+
+- TEST LINE：`菲比智能客服 測試`
+- Worker 最終版本：`3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
+- 查詢未送 n8n
+- n8n 僅保留既有成功記錄流程，未新增查詢路由
+- 固定 Dropbox TEST 路徑維持：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- local-query-api 路徑維持文件既有設定
+- 分類測試 JSON：`category=網站`
+- 分類測試 JSON：`text` 已移除 `［網站］`
+- 分類測試 JSON：`original_text` 保留
+- 刪除測試資料已移至 `想法紀錄_TEST_已刪除`
+- Codex queue 測試前 2、測試後 3，新增 1 筆 pending
+- duplicate JSON = 0
+- duplicate reply = 0
+- 舊專案未修改
+- FORMAL 未操作
+
+補充：
+
+先前 TEST 中查詢分類曾失敗，後由 Worker 路由優先順序修正後 PASS。
+
+---
+
 # V2.0 Baseline
 
 2026-07-16 已將目前成功版本保存為正式開發基準。
@@ -168,6 +206,9 @@ FORMAL_ALLOWED=false
 - n8n HTTP 200
 - TEST Dropbox JSON 寫入
 - 日／月／年查詢分流
+- 搜尋 / 查看 / 修改 / 刪除
+- 分類記錄與分類搜尋
+- Codex queue pending task
 - LINE Reply：`記好了 ✨`
 
 新增功能時，必須優先使用：
@@ -204,8 +245,10 @@ FORMAL_ALLOWED=false
 3. n8n 收到文字：PASS
 4. Dropbox 寫入 JSON：PASS
 5. 自然語言記錄想法：PASS
-6. 依日／月／年查詢與統計：月／年查詢 PASS，日查詢 action 已完成
-7. 後續 Codex 派工能力
+6. 依日／月／年查詢與統計：PASS
+7. 搜尋、查看、修改、刪除：PASS
+8. 分類記錄與分類搜尋：PASS
+9. Codex queue pending task：PASS
 
 在以上主要功能未全部暢通前，不得因以下項目阻塞主線：
 
@@ -249,7 +292,9 @@ FORMAL_ALLOWED=false
 - 查詢新增 JSON = 0
 - 記錄測試新增 JSON = 1
 - Worker URL / name unchanged
+- Worker final version = `3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
 - n8n workflow unchanged
+- 查詢未送 n8n
 - baseline commit / tag 由 `PLine｜RELEASE｜階段收尾與上線檢查` 建立
 - 未 push
 

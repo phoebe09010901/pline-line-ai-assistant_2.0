@@ -1,8 +1,9 @@
 const LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply";
 const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v2-0-test";
-const LOCAL_QUERY_API_URL = "https://susan-bottom-shelter-interim.trycloudflare.com/query";
+const LOCAL_QUERY_API_URL = "https://provide-defined-tim-contributions.trycloudflare.com/query";
 const FIXED_REPLY_TEXT = "記好了 ✨";
 const QUERY_ERROR_TEXT = "查詢暫時沒有成功，請稍後再試一次 🙏";
+const CLASSIFIED_RECORD_PATTERN = /［(網站|報價|課程)］\s*/;
 
 const COUNT_DAY_PHRASES = [
   "我今天記了幾筆",
@@ -125,12 +126,43 @@ function queryAction(text) {
   return null;
 }
 
-async function getReplyTextFromQuery(action) {
+function directQuery(text) {
+  let match = text.match(/^列出(.+?)類想法$/);
+  if (match) return { action: "search_category", category: match[1] };
+  match = text.match(/^搜尋分類(.+)$/);
+  if (match) return { action: "search_category", category: match[1] };
+  match = text.match(/^幫我找跟(.+?)有關的想法$/);
+  if (match) return { action: "search", keyword: match[1] };
+  match = text.match(/^(?:搜尋|找)(.+)$/);
+  if (match) return { action: "search", keyword: match[1] };
+  match = text.match(/^(?:看|查看)第\s*(\d+)\s*筆$/);
+  if (match) return { action: "get_item", index: Number(match[1]) };
+  match = text.match(/^(?:把第\s*(\d+)\s*筆改成|修改第\s*(\d+)\s*筆為)(.+)$/);
+  if (match) return { action: "update_item", index: Number(match[1] || match[2]), text: match[3].trim() };
+  match = text.match(/^(?:刪除第\s*(\d+)\s*筆|把第\s*(\d+)\s*筆刪掉)$/);
+  if (match) return { action: "delete_item", index: Number(match[1] || match[2]) };
+  match = text.match(/^(?:把第\s*(\d+)\s*筆派給 Codex|請 Codex 分析第\s*(\d+)\s*筆)$/);
+  if (match) return { action: "codex_task", index: Number(match[1] || match[2]) };
+  return null;
+}
+
+function classifiedRecordQuery(text) {
+  const match = text.match(CLASSIFIED_RECORD_PATTERN);
+  if (!match) return null;
+  return {
+    action: "record",
+    text: text.replace(CLASSIFIED_RECORD_PATTERN, "").replace(/^阿光，記一下\s*/, ""),
+    original_text: text,
+    category: match[1],
+  };
+}
+
+async function getReplyTextFromQuery(query) {
   try {
     const response = await fetch(LOCAL_QUERY_API_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action }),
+      body: JSON.stringify(query),
     });
 
     if (!response.ok) {
@@ -184,9 +216,15 @@ export default {
           event.replyToken.length > 0
         ) {
           const action = queryAction(event.message.text);
-          const replyText = action
-            ? await getReplyTextFromQuery(action)
-            : (await getReplyTextFromN8n(event.message.text)) || FIXED_REPLY_TEXT;
+          const classifiedRecord = classifiedRecordQuery(event.message.text);
+          const directQueryRequest = directQuery(event.message.text);
+          const replyText = classifiedRecord
+            ? await getReplyTextFromQuery(classifiedRecord)
+            : directQueryRequest
+              ? await getReplyTextFromQuery(directQueryRequest)
+            : action
+              ? await getReplyTextFromQuery({ action })
+              : (await getReplyTextFromN8n(event.message.text)) || FIXED_REPLY_TEXT;
           await replyToLine(event.replyToken, replyText, env);
         }
       }),

@@ -4,6 +4,41 @@
 
 ## 2026-07-16
 
+### 第一版功能完整 PASS
+
+目前第一版功能已由 FIX worker 完成並 PASS。
+
+已完成：
+
+- LINE 記錄想法與固定回覆
+- Dropbox JSON 寫入
+- 日 / 月 / 年數量與清單
+- 搜尋、查看、修改、刪除
+- 分類記錄直接 Worker → local-query-api → Dropbox
+- 分類搜尋
+- Codex queue pending task
+
+Computer Use 驗收結果：
+
+- TEST LINE：`菲比智能客服 測試`
+- Worker 最終版本：`3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
+- 查詢未送 n8n
+- n8n 僅保留既有成功記錄流程，未新增查詢路由
+- 分類測試 JSON：`category=網站`
+- 分類測試 JSON：`text` 已移除 `［網站］`
+- 分類測試 JSON：`original_text` 保留
+- 刪除測試資料已移至 `想法紀錄_TEST_已刪除`
+- Codex queue 測試前 2、測試後 3，新增 1 筆 pending
+- duplicate JSON / reply = 0
+- 舊專案未修改
+- FORMAL 未操作
+
+補充：
+
+先前 TEST 中查詢分類曾失敗，後由 Worker 路由優先順序修正後 PASS。
+
+---
+
 ### 日／月／年查詢功能 PASS
 
 FIX worker 已完成查詢功能並 PASS。
@@ -83,6 +118,9 @@ LINE「菲比智能客服 測試」
 - n8n HTTP 200
 - TEST Dropbox JSON 寫入
 - 日／月／年查詢分流
+- 搜尋 / 查看 / 修改 / 刪除
+- 分類記錄與分類搜尋
+- Codex queue pending task
 - LINE Reply：`記好了 ✨`
 
 原則：
@@ -99,8 +137,10 @@ LINE「菲比智能客服 測試」
 3. n8n 收到文字：PASS
 4. Dropbox 寫入 JSON：PASS
 5. 自然語言記錄想法：PASS
-6. 依日／月／年查詢與統計：月／年查詢 PASS，日查詢 action 已完成
-7. 後續 Codex 派工能力
+6. 依日／月／年查詢與統計：PASS
+7. 搜尋、查看、修改、刪除：PASS
+8. 分類記錄與分類搜尋：PASS
+9. Codex queue pending task：PASS
 
 在主要功能未全部暢通前，額外 Gate、preflight、diagnostic、review、recovery、evidence、handoff、cleanup、root cause、baseline lock、arm helper、session lifecycle、terminal ACK、forward settlement、多層 authorization、額外安全審查、完整測試框架、複雜狀態機，統一記錄為：
 
