@@ -24,6 +24,8 @@ const WAKE_TOKEN = process.env.CODEX_WAKE_TOKEN || "";
 const POLL_INTERVAL_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 20_000);
 const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || "executor-status:test:default";
+const PENDING_QUEUE_KEY = process.env.CODEX_PENDING_QUEUE_KEY || "queues/pending:test:default";
+const PENDING_QUEUE_LIMIT = Number(process.env.CODEX_PENDING_QUEUE_LIMIT || 200);
 const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
 const EXECUTOR_INSTANCE_ID = process.env.CODEX_EXECUTOR_INSTANCE_ID || `${EXECUTOR_ID}:${process.pid}`;
 const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || "test";
@@ -733,6 +735,52 @@ async function executeAndPush(task) {
   return maybeBuildClarificationResult(task) || executeWithCodex(task);
 }
 
+function parsePendingQueue(raw) {
+  if (!raw) return null;
+  let parsed;
+  try { parsed = typeof raw === "string" ? JSON.parse(raw) : raw; } catch { return null; }
+  const keys = Array.isArray(parsed) ? parsed : parsed?.keys;
+  if (!Array.isArray(keys)) return null;
+  return [...new Set(keys.filter((key) => typeof key === "string" && key.startsWith("pending/")))];
+}
+
+async function queuedPendingKeys() {
+  const raw = await kvAdapter.getOrNull(PENDING_QUEUE_KEY).catch((error) => {
+    console.error("pending_queue_read_failed", { summary: error instanceof Error ? error.message : String(error) });
+    return null;
+  });
+  return parsePendingQueue(raw);
+}
+
+async function writePendingQueue(keys = []) {
+  const cleanKeys = [...new Set(keys.filter((key) => typeof key === "string" && key.startsWith("pending/")))].slice(-PENDING_QUEUE_LIMIT);
+  await kvAdapter.put(PENDING_QUEUE_KEY, JSON.stringify({
+    keys: cleanKeys,
+    updated_at: now(),
+    environment: EXECUTOR_ENVIRONMENT,
+  })).catch((error) => {
+    console.error("pending_queue_write_failed", { summary: error instanceof Error ? error.message : String(error) });
+  });
+}
+
+async function removeQueuedPendingKey(pendingKey) {
+  const keys = await queuedPendingKeys();
+  if (!keys) return;
+  const nextKeys = keys.filter((key) => key !== pendingKey);
+  if (nextKeys.length !== keys.length) await writePendingQueue(nextKeys);
+}
+
+async function pendingKeysForScan() {
+  const queuedKeys = await queuedPendingKeys();
+  if (queuedKeys?.length) return queuedKeys;
+  try {
+    return await kvAdapter.list("pending/");
+  } catch (error) {
+    console.error("pending_list_failed", { summary: error instanceof Error ? error.message : String(error), fallback: "queue_index_empty" });
+    return [];
+  }
+}
+
 export async function scanKvOnce(handler = executeAndPush) {
   if (localScanLock) return;
   localScanLock = true;
@@ -746,18 +794,30 @@ export async function scanKvOnce(handler = executeAndPush) {
     await setExecutorRuntimeStatus(executorRuntimeStatus === "busy" ? "busy" : "online", executorCurrentTaskId, {
       last_scan_started_at: now(),
     });
-    const pendingKeys = await kvAdapter.list("pending/");
+    const pendingKeys = await pendingKeysForScan();
     for (const pendingKey of pendingKeys) {
       const file = pendingKey.slice("pending/".length);
       const completedKey = `completed/${file}`;
       const failedKey = `failed/${file}`;
       if (await kvAdapter.getOrNull(completedKey) || await kvAdapter.getOrNull(failedKey)) {
         await kvAdapter.delete(pendingKey).catch(() => {});
+        await removeQueuedPendingKey(pendingKey);
         continue;
       }
-      const task = JSON.parse(await kvAdapter.get(pendingKey));
+      const taskRaw = await kvAdapter.get(pendingKey).catch((error) => {
+        console.error("pending_task_read_failed", { key: pendingKey, summary: error instanceof Error ? error.message : String(error) });
+        return null;
+      });
+      if (!taskRaw) {
+        await removeQueuedPendingKey(pendingKey);
+        continue;
+      }
+      const task = JSON.parse(taskRaw);
       const processingKey = `processing/${file}`;
-      if (await kvAdapter.getOrNull(processingKey)) continue;
+      if (await kvAdapter.getOrNull(processingKey)) {
+        await removeQueuedPendingKey(pendingKey);
+        continue;
+      }
       const claimToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       task.status = "processing";
       task.claimed_at = now();
@@ -769,6 +829,7 @@ export async function scanKvOnce(handler = executeAndPush) {
       const confirmedClaim = await kvAdapter.getOrNull(processingKey);
       if (!confirmedClaim || JSON.parse(confirmedClaim).claim_token !== claimToken) continue;
       await kvAdapter.delete(pendingKey);
+      await removeQueuedPendingKey(pendingKey);
       try {
         task.execution_started_at = now();
         const executionStart = await recordExecutionStart(task);
@@ -779,6 +840,7 @@ export async function scanKvOnce(handler = executeAndPush) {
           task.duplicate_execution_blocked = true;
           if (!(await kvAdapter.getOrNull(completedKey))) await kvAdapter.put(failedKey, JSON.stringify(task));
           await kvAdapter.delete(processingKey);
+          await removeQueuedPendingKey(pendingKey);
           continue;
         }
         await setExecutorRuntimeStatus("busy", task.task_id, {
@@ -812,6 +874,7 @@ export async function scanKvOnce(handler = executeAndPush) {
         if (!push.pushed) task.final_push_error = push.reason || "push_failed";
         await kvAdapter.put(completedKey, JSON.stringify(task));
         await kvAdapter.delete(processingKey);
+        await removeQueuedPendingKey(pendingKey);
         await updateExecutionRecord(task, "completed");
         await updateOperationFingerprintRecord(task, "completed");
         await setExecutorRuntimeStatus("online", null, { last_completed_task_id: task.task_id });
@@ -827,6 +890,7 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.final_push_idempotency_key = `final/${task.idempotency_hash || task.task_id}`;
         if (!(await kvAdapter.getOrNull(completedKey))) await kvAdapter.put(failedKey, JSON.stringify(task));
         await kvAdapter.delete(processingKey);
+        await removeQueuedPendingKey(pendingKey);
         await updateExecutionRecord(task, "failed");
         await updateOperationFingerprintRecord(task, "failed");
         await setExecutorRuntimeStatus("online", null, { last_failed_task_id: task.task_id });

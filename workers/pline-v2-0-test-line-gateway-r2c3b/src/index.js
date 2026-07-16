@@ -7,6 +7,8 @@ const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
 const WORKER_VERSION = "V3.4";
 const ENVIRONMENT = "test";
 const EXECUTOR_STATUS_KEY = "executor-status:test:default";
+const PENDING_QUEUE_KEY = "queues/pending:test:default";
+const PENDING_QUEUE_LIMIT = 200;
 const EXECUTOR_OFFLINE_AFTER_MS = 75_000;
 const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
 const LONG_TASK_HINTS = [
@@ -232,6 +234,22 @@ function wakePlan(env = {}, request = null, queuedWhileOffline = false, createdA
   return { status: "scheduled", skip_reason: null, sent_at: createdAt };
 }
 
+async function enqueuePendingTask(env = {}, pendingKey) {
+  if (!env.CODEX_INBOX || !pendingKey) return null;
+  let queuedKeys = [];
+  const raw = await env.CODEX_INBOX.get(PENDING_QUEUE_KEY, "json").catch(() => null);
+  if (Array.isArray(raw)) queuedKeys = raw;
+  else if (Array.isArray(raw?.keys)) queuedKeys = raw.keys;
+  queuedKeys = queuedKeys.filter((key) => typeof key === "string" && key !== pendingKey);
+  queuedKeys.push(pendingKey);
+  if (queuedKeys.length > PENDING_QUEUE_LIMIT) queuedKeys = queuedKeys.slice(-PENDING_QUEUE_LIMIT);
+  const payload = { keys: queuedKeys, updated_at: taipeiNow(), environment: ENVIRONMENT };
+  await env.CODEX_INBOX.put(PENDING_QUEUE_KEY, JSON.stringify(payload)).catch((error) => {
+    console.error("pending_queue_write_failed", { summary: error instanceof Error ? error.message : String(error) });
+  });
+  return payload;
+}
+
 export async function writeInboxTask(event, env, request = null) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
@@ -332,6 +350,7 @@ export async function writeInboxTask(event, env, request = null) {
     }), { expirationTtl: OPERATION_FINGERPRINT_TTL_SECONDS });
   }
   await env.CODEX_INBOX.put(key, JSON.stringify(task));
+  await enqueuePendingTask(env, key);
   return { duplicate: false, task };
 }
 
@@ -403,6 +422,10 @@ function wakeMonitorSoon(task, env = {}, ctx, request = null) {
   const wake = wakeMonitor(task, env, request);
   if (ctx?.waitUntil) ctx.waitUntil(wake);
   else void wake;
+}
+
+function taskCreationFailedReply() {
+  return "我目前暫時無法建立任務，這次還沒有開始處理。請你稍後再傳一次。";
 }
 
 async function pushLineText(taskId, text, env, pushType = "final") {
@@ -477,6 +500,9 @@ export default {
         }
       } catch (error) {
         console.error("inbox_task_failed", { status: "error", summary: error instanceof Error ? error.message : String(error) });
+        await replyToLine(event, env, taskCreationFailedReply()).catch((replyError) => {
+          console.error("line_reply_failed_after_inbox_error", { status: "error", summary: replyError instanceof Error ? replyError.message : String(replyError) });
+        });
       }
     }
     return json({ ok: true });
