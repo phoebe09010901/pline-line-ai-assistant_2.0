@@ -22,7 +22,7 @@ const WAKE_HOST = process.env.CODEX_WAKE_HOST || "127.0.0.1";
 const WAKE_PORT = Number(process.env.CODEX_WAKE_PORT || 8793);
 const WAKE_TOKEN = process.env.CODEX_WAKE_TOKEN || "";
 const POLL_INTERVAL_MS = 60_000;
-const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 20_000);
+const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 300_000);
 const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || "executor-status:test:default";
 const PENDING_QUEUE_KEY = process.env.CODEX_PENDING_QUEUE_KEY || "queues/pending:test:default";
 const PENDING_QUEUE_LIMIT = Number(process.env.CODEX_PENDING_QUEUE_LIMIT || 200);
@@ -30,7 +30,7 @@ const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
 const EXECUTOR_INSTANCE_ID = process.env.CODEX_EXECUTOR_INSTANCE_ID || `${EXECUTOR_ID}:${process.pid}`;
 const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || "test";
 const MONITOR_VERSION = "V3.4";
-const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 75_000);
+const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 600_000);
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
@@ -41,6 +41,8 @@ let executorRuntimeStatus = "online";
 let executorCurrentTaskId = null;
 let executorLastHeartbeatAt = null;
 let heartbeatInFlight = false;
+let executorLastWrittenStatus = null;
+let executorLastWrittenTaskId = null;
 
 function isLocalAddress(address = "") {
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
@@ -282,9 +284,24 @@ async function activeExecutorConflict() {
 
 export async function writeExecutorStatus(status = executorRuntimeStatus, currentTaskId = executorCurrentTaskId, extra = {}) {
   if (!shouldWriteExecutorStatus()) return null;
+  const forceWrite = [
+    "started_at",
+    "wake_received_at",
+    "last_wake_received_at",
+    "execution_started_at",
+    "last_completed_task_id",
+    "last_failed_task_id",
+  ].some((key) => Object.prototype.hasOwnProperty.call(extra, key));
+  const lastHeartbeatMs = Date.parse(String(executorLastHeartbeatAt || ""));
+  const recentlyWritten = Number.isFinite(lastHeartbeatMs) && Date.now() - lastHeartbeatMs < HEARTBEAT_INTERVAL_MS;
+  if (!forceWrite && recentlyWritten && executorLastWrittenStatus === status && executorLastWrittenTaskId === (currentTaskId || null)) {
+    return null;
+  }
   const payload = executorStatusPayload(status, currentTaskId, extra);
   await kvAdapter.put(EXECUTOR_STATUS_KEY, JSON.stringify(payload));
   executorLastHeartbeatAt = payload.last_heartbeat_at;
+  executorLastWrittenStatus = status;
+  executorLastWrittenTaskId = currentTaskId || null;
   return payload;
 }
 

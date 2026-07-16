@@ -9,7 +9,7 @@ const ENVIRONMENT = "test";
 const EXECUTOR_STATUS_KEY = "executor-status:test:default";
 const PENDING_QUEUE_KEY = "queues/pending:test:default";
 const PENDING_QUEUE_LIMIT = 200;
-const EXECUTOR_OFFLINE_AFTER_MS = 75_000;
+const EXECUTOR_OFFLINE_AFTER_MS = 600_000;
 const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
 const LONG_TASK_HINTS = [
   "修改檔案", "整理專案", "執行程式", "部署", "computer use", "Computer Use",
@@ -147,7 +147,12 @@ function executorStatusKey(env = {}) {
   return env.CODEX_EXECUTOR_STATUS_KEY || EXECUTOR_STATUS_KEY;
 }
 
-function parseExecutorStatus(raw, checkedAtMs = Date.now()) {
+function executorOfflineAfterMs(env = {}) {
+  const value = Number(env.CODEX_EXECUTOR_OFFLINE_AFTER_MS || EXECUTOR_OFFLINE_AFTER_MS);
+  return Number.isFinite(value) && value > 0 ? value : EXECUTOR_OFFLINE_AFTER_MS;
+}
+
+function parseExecutorStatus(raw, checkedAtMs = Date.now(), offlineAfterMs = EXECUTOR_OFFLINE_AFTER_MS) {
   if (!raw || typeof raw !== "object") {
     return {
       state: "unknown",
@@ -163,7 +168,7 @@ function parseExecutorStatus(raw, checkedAtMs = Date.now()) {
   const lastHeartbeat = typeof raw.last_heartbeat_at === "string" ? raw.last_heartbeat_at : null;
   const lastHeartbeatMs = lastHeartbeat ? Date.parse(lastHeartbeat) : Number.NaN;
   const ageMs = Number.isFinite(lastHeartbeatMs) ? checkedAtMs - lastHeartbeatMs : null;
-  const stale = ageMs === null || ageMs > EXECUTOR_OFFLINE_AFTER_MS;
+  const stale = ageMs === null || ageMs > offlineAfterMs;
   const status = typeof raw.status === "string" ? raw.status : "unknown";
   const busy = status === "busy" && !stale;
   const online = (status === "online" || status === "busy") && !stale;
@@ -185,13 +190,14 @@ function parseExecutorStatus(raw, checkedAtMs = Date.now()) {
 }
 
 export async function readExecutorStatus(env = {}, checkedAtMs = Date.now()) {
-  if (!env.CODEX_INBOX) return parseExecutorStatus(null, checkedAtMs);
+  const offlineAfterMs = executorOfflineAfterMs(env);
+  if (!env.CODEX_INBOX) return parseExecutorStatus(null, checkedAtMs, offlineAfterMs);
   try {
     const raw = await env.CODEX_INBOX.get(executorStatusKey(env), "json");
-    return parseExecutorStatus(raw, checkedAtMs);
+    return parseExecutorStatus(raw, checkedAtMs, offlineAfterMs);
   } catch (error) {
     console.error("executor_status_read_failed", { summary: error instanceof Error ? error.message : String(error) });
-    return { ...parseExecutorStatus(null, checkedAtMs), read_error: true };
+    return { ...parseExecutorStatus(null, checkedAtMs, offlineAfterMs), read_error: true };
   }
 }
 
