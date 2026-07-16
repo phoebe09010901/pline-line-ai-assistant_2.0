@@ -4,9 +4,67 @@
 
 ---
 
-# V3.3 mainline｜offline queue recovery / fallback poll
+# V3.4 mainline｜allowlist owner admin 修正
 
-本輪文件結論以 V3.3 TEST LINE 真實驗收為準。V3.1 阿光統一人格與自然任務回覆基準、V3.0 closed-loop verification、V2 / 第一版 Dropbox baseline 與 receive-only checkpoint 保留為歷史基準。
+本輪文件結論以 V3.4 allowlist / owner admin 真實驗收為準。V3.3 offline queue recovery、V3.1 阿光統一人格與自然任務回覆基準、V3.0 closed-loop verification、V2 / 第一版 Dropbox baseline 與 receive-only checkpoint 保留為歷史基準。
+
+## V3.4 allowlist / owner admin 修正
+
+根因：TEST runtime `PLINE_ADMIN_LINE_USER_IDS` allowlist 指到錯的 LINE 帳號，導致非 owner / 非預期帳號被設為 admin，真正 owner 被 deny。
+
+修正狀態：
+
+- 程式 env 名稱正確：`PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`
+- Worker version：V3.4
+- FIX 只修 TEST Worker runtime secret，將 `PLINE_ADMIN_LINE_USER_IDS` 改為 owner 指紋 `129bd0dd27ee` 對應的 LINE userId
+- 完整 LINE userId 未顯示、未寫入 repo
+- Cloudflare Secret Change deployment：`2026-07-16T12:08:19.915Z`
+- Cloudflare Secret Change version：`8dee98ae-d8d3-4c6d-b2be-ef06d3a1b86a`
+- 未修改檔案、未 commit、未 push、未碰 n8n / FORMAL / 舊專案 / 正式 LINE
+
+## V3.4 真實驗收結果
+
+- TEST thread id：`019f6940-ff63-7392-8dab-d285f4f44928`
+- TEST turn id：`019f6ad5-487e-7651-a464-d2fbfcd30535`
+- owner/admin 訊息：`我現在有多少想法 V34OWNER2010`
+- owner task：`task-b5d9a64f814016e26de723a103d0a6e2`
+- display id：`P-NGWX1T-0PNY`
+- owner 指紋：`129bd0dd27ee`
+- role / auth：`admin / allow_admin`
+- 狀態：pending → processing → completed
+- attempts：`1`
+- final push：`sent / HTTP 200`
+- final：`我查到了，你現在共有 3 則想法。`
+- 先前錯帳號指紋：`18ba0ce4706d`
+- 非 admin auth-event：`guest / deny_not_in_admin_allowlist`
+- 非 admin 結果：收到限制訊息，不進 pending / processing，不啟動 executor
+- KV 收斂：pending=0、processing=0
+- 工程欄位外洩：本輪 owner final 與 deny 訊息未檢出 Codex / monitor / Worker / Gateway / task_id / PID / stdout / stderr / local path
+- duplicate：owner task attempts=1，非 admin 未建 task；未見重複 task / execution / final push
+
+可標 PASS：
+
+- V3.4 allowlist / owner admin 修正
+- 非 admin 阻擋
+- 管理者 task 建立與 final push
+
+不可標 PASS / 待 FIX：
+
+- 不得把 V3.4 全功能標成完全 PASS
+- 列表語句 `請通通幫我列出來`：FAILED / 待 FIX
+- 旁支 task：`task-7aa0f59c07617bc6f6764f4be0923f39`
+- failed 原因：`Codex did not provide a valid LINE final message`
+- 此旁支不是 allowlist 修正阻塞點，但表示「列表語句 final 產生」仍待 FIX，不可把整體列表功能標 PASS
+
+邊界：
+
+- 本輪是 TEST Worker / TEST LINE allowlist 修正驗收
+- 不碰正式 LINE、FORMAL、n8n、舊專案或 credentials
+- 不顯示、記錄或提交完整 LINE userId / token / secret
+
+---
+
+# V3.3 history｜offline queue recovery / fallback poll
 
 ## V3.3 真實驗收狀態
 
