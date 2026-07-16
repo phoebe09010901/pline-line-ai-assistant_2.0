@@ -23,8 +23,10 @@ const POLL_INTERVAL_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 20_000);
 const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || "executor-status:test:default";
 const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
+const EXECUTOR_INSTANCE_ID = process.env.CODEX_EXECUTOR_INSTANCE_ID || `${EXECUTOR_ID}:${process.pid}`;
 const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || "test";
-const MONITOR_VERSION = "V3.3";
+const MONITOR_VERSION = "V3.4";
+const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 75_000);
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
@@ -247,6 +249,7 @@ export function executorStatusPayload(status = "online", currentTaskId = null, e
   const heartbeatAt = now();
   return {
     executor_id: EXECUTOR_ID,
+    executor_instance_id: EXECUTOR_INSTANCE_ID,
     environment: EXECUTOR_ENVIRONMENT,
     status,
     last_heartbeat_at: heartbeatAt,
@@ -256,6 +259,21 @@ export function executorStatusPayload(status = "online", currentTaskId = null, e
     heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
     ...extra,
   };
+}
+
+function isFreshExecutorStatus(status = {}) {
+  const lastHeartbeat = Date.parse(String(status.last_heartbeat_at || ""));
+  return Number.isFinite(lastHeartbeat) && Date.now() - lastHeartbeat <= EXECUTOR_STALE_AFTER_MS;
+}
+
+async function activeExecutorConflict() {
+  if (!shouldWriteExecutorStatus()) return false;
+  const raw = await kvAdapter.getOrNull(EXECUTOR_STATUS_KEY).catch(() => null);
+  if (!raw) return false;
+  let status;
+  try { status = JSON.parse(raw); } catch { return false; }
+  if (!isFreshExecutorStatus(status)) return false;
+  return Boolean(status.executor_instance_id && status.executor_instance_id !== EXECUTOR_INSTANCE_ID);
 }
 
 export async function writeExecutorStatus(status = executorRuntimeStatus, currentTaskId = executorCurrentTaskId, extra = {}) {
@@ -482,12 +500,19 @@ async function executeWithCodex(task) {
     `既有 Dropbox 想法刪除資料夾：${DROPBOX_DELETED_DIR}`,
     `想法修改/刪除工具：${IDEA_TOOLS}`,
     "請自行理解需求、選擇現有工具並真正完成工作。不要做預先 regex 分類，不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
-    "若原句是保存想法/備忘，直接使用既有本機工具新增一份 JSON，保留 original_text，完成後停止。",
+    "若原句是保存想法/備忘，只能使用既有本機工具新增想法，不得自行手寫 JSON。請執行：node codex-inbox/idea-tools.js save --text <要保存的想法內容> --task-id <task_id> --source-event-id <line_event_id> --source-message-id <line_message_id> --source-user-id <source_user_id> --source-user-fingerprint <source_user_fingerprint> --idempotency-key <idempotency_key> --operation-fingerprint <operation_fingerprint>。如果工具回傳 duplicate=true，final_user_message 要說我剛剛已經記過同一個內容，這次沒有重複新增。",
     "若原句是列出、查看、顯示既有想法內容，請優先使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search；若菲比指定今天/本月/今年，請加 --period day/month/year。final_user_message 只列出想法內容，不顯示檔名、路徑、工具名稱或工程欄位。",
     "若原句是修改既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js update --query <定位文字> --text <修改後文字>；若只有最後一筆語意，才可加 --latest。",
     "若原句是刪除既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js delete --query <定位文字>；刪除必須移到既有 Dropbox 想法刪除資料夾，不可直接硬刪。",
     "local-query-api 只可用於 count/list 查詢；不要把它當成修改或刪除工具。",
     `original_text：${task.original_text}`,
+    `task_id：${task.task_id || ""}`,
+    `line_event_id：${task.line_event_id || ""}`,
+    `line_message_id：${task.line_message_id || ""}`,
+    `source_user_id：${task.source_user_id || task.user_id || ""}`,
+    `source_user_fingerprint：${task.source_user_fingerprint || ""}`,
+    `idempotency_key：${task.idempotency_key || ""}`,
+    `operation_fingerprint：${task.operation_fingerprint || ""}`,
     "",
     "工作完成後，請產生 technical_summary 與 final_user_message。",
     "如果 execution_mode 是 long，也必須產生 progress_stage 與 progress_user_message；progress_user_message 是自然的進度通知，由你依實際狀態撰寫，不要使用內部 task_id、PID、stdout、stderr、本機路徑或工程欄位。",
@@ -600,6 +625,55 @@ async function applyQueuedRecoveryNotice(task) {
   return result;
 }
 
+function executionIdempotencyKey(task = {}) {
+  return `executions/${task.idempotency_hash || task.idempotency_key || task.task_id}`;
+}
+
+function operationFingerprintKey(task = {}) {
+  return task.operation_fingerprint ? `operation-fingerprints/${task.operation_fingerprint}` : null;
+}
+
+async function recordExecutionStart(task = {}) {
+  const key = executionIdempotencyKey(task);
+  const existing = await kvAdapter.getOrNull(key).catch(() => null);
+  if (existing) {
+    let parsed;
+    try { parsed = JSON.parse(existing); } catch { parsed = null; }
+    if (parsed?.status === "completed" || parsed?.status === "processing") return { duplicate: true, existing: parsed };
+  }
+  await kvAdapter.put(key, JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    status: "processing",
+    started_at: task.execution_started_at || now(),
+    executor_instance_id: EXECUTOR_INSTANCE_ID,
+  }));
+  return { duplicate: false };
+}
+
+async function updateExecutionRecord(task = {}, status = "completed") {
+  await kvAdapter.put(executionIdempotencyKey(task), JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    status,
+    updated_at: now(),
+    executor_instance_id: EXECUTOR_INSTANCE_ID,
+  })).catch(() => {});
+}
+
+async function updateOperationFingerprintRecord(task = {}, status = "completed") {
+  const key = operationFingerprintKey(task);
+  if (!key) return;
+  await kvAdapter.put(key, JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    operation_type: task.operation_type || null,
+    operation_target: task.operation_target || null,
+    status,
+    updated_at: now(),
+  }), { expirationTtl: 5 * 60 }).catch(() => {});
+}
+
 async function executeAndPush(task) {
   return executeWithCodex(task);
 }
@@ -607,7 +681,13 @@ async function executeAndPush(task) {
 export async function scanKvOnce(handler = executeAndPush) {
   if (localScanLock) return;
   localScanLock = true;
+  let claimBlockedByActiveExecutor = false;
   try {
+    if (await activeExecutorConflict()) {
+      claimBlockedByActiveExecutor = true;
+      console.error("executor_claim_blocked", { reason: "another_active_executor_instance", executor_instance_id: EXECUTOR_INSTANCE_ID });
+      return;
+    }
     await setExecutorRuntimeStatus(executorRuntimeStatus === "busy" ? "busy" : "online", executorCurrentTaskId, {
       last_scan_started_at: now(),
     });
@@ -622,6 +702,7 @@ export async function scanKvOnce(handler = executeAndPush) {
       }
       const task = JSON.parse(await kvAdapter.get(pendingKey));
       const processingKey = `processing/${file}`;
+      if (await kvAdapter.getOrNull(processingKey)) continue;
       const claimToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       task.status = "processing";
       task.claimed_at = now();
@@ -635,6 +716,16 @@ export async function scanKvOnce(handler = executeAndPush) {
       await kvAdapter.delete(pendingKey);
       try {
         task.execution_started_at = now();
+        const executionStart = await recordExecutionStart(task);
+        if (executionStart.duplicate) {
+          task.status = "failed";
+          task.failed_at = now();
+          task.error_summary = "Duplicate execution idempotency key";
+          task.duplicate_execution_blocked = true;
+          if (!(await kvAdapter.getOrNull(completedKey))) await kvAdapter.put(failedKey, JSON.stringify(task));
+          await kvAdapter.delete(processingKey);
+          continue;
+        }
         await setExecutorRuntimeStatus("busy", task.task_id, {
           execution_started_at: task.execution_started_at,
         });
@@ -662,9 +753,12 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.final_push_status = push.pushed ? "sent" : "failed";
         task.final_push_http_status = push.status;
         task.final_push_at = now();
+        task.final_push_idempotency_key = `final/${task.idempotency_hash || task.task_id}`;
         if (!push.pushed) task.final_push_error = push.reason || "push_failed";
         await kvAdapter.put(completedKey, JSON.stringify(task));
         await kvAdapter.delete(processingKey);
+        await updateExecutionRecord(task, "completed");
+        await updateOperationFingerprintRecord(task, "completed");
         await setExecutorRuntimeStatus("online", null, { last_completed_task_id: task.task_id });
       } catch (error) {
         const owner = await kvAdapter.getOrNull(processingKey);
@@ -675,13 +769,16 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.retryable = true;
         await applyFailedFinalPush(task, error);
         task.final_push_at = now();
+        task.final_push_idempotency_key = `final/${task.idempotency_hash || task.task_id}`;
         if (!(await kvAdapter.getOrNull(completedKey))) await kvAdapter.put(failedKey, JSON.stringify(task));
         await kvAdapter.delete(processingKey);
+        await updateExecutionRecord(task, "failed");
+        await updateOperationFingerprintRecord(task, "failed");
         await setExecutorRuntimeStatus("online", null, { last_failed_task_id: task.task_id });
       }
     }
   } finally {
-    if (shouldWriteExecutorStatus() && executorRuntimeStatus !== "busy") {
+    if (!claimBlockedByActiveExecutor && shouldWriteExecutorStatus() && executorRuntimeStatus !== "busy") {
       await setExecutorRuntimeStatus("online", null, { last_scan_finished_at: now() });
     }
     localScanLock = false;

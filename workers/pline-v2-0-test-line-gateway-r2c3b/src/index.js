@@ -4,9 +4,11 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.3";
+const WORKER_VERSION = "V3.4";
+const ENVIRONMENT = "test";
 const EXECUTOR_STATUS_KEY = "executor-status:test:default";
 const EXECUTOR_OFFLINE_AFTER_MS = 75_000;
+const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
 const LONG_TASK_HINTS = [
   "修改檔案", "整理專案", "執行程式", "部署", "computer use", "Computer Use",
   "多步驟", "長時間分析", "修正程式", "實作", "開發", "重構",
@@ -26,6 +28,17 @@ function taipeiNow() {
   return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}:${values.second}+08:00`;
 }
 
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(String(text));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function shortFingerprint(value) {
+  if (!value) return null;
+  return (await sha256Hex(value)).slice(0, 12);
+}
+
 function taskId(event, lineEventId) {
   return event.webhookEventId || lineEventId;
 }
@@ -38,6 +51,90 @@ function displayTaskId() {
 
 function executionMode(text) {
   return LONG_TASK_HINTS.some((hint) => text.includes(hint)) ? "long" : "quick";
+}
+
+function sourceUserId(event = {}) {
+  return typeof event.source?.userId === "string" ? event.source.userId : "";
+}
+
+function sourceType(event = {}) {
+  return typeof event.source?.type === "string" ? event.source.type : "unknown";
+}
+
+function lineMessageId(event = {}) {
+  return typeof event.message?.id === "string" ? event.message.id : "";
+}
+
+function allowlistValues(value = "") {
+  return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+export function resolveRole(event = {}, env = {}) {
+  const userId = sourceUserId(event);
+  const adminIds = allowlistValues(env.PLINE_ADMIN_LINE_USER_IDS || env.ADMIN_LINE_USER_IDS || "");
+  const allowedIds = allowlistValues(env.PLINE_ALLOWED_LINE_USER_IDS || env.ALLOWED_LINE_USER_IDS || "");
+  if (!userId) return { role: "unknown", authorization_result: "deny_missing_user_id" };
+  if (adminIds.includes(userId)) return { role: "admin", authorization_result: "allow_admin" };
+  if (allowedIds.includes(userId)) return { role: "allowed_user", authorization_result: "deny_allowed_user_private_disabled" };
+  return { role: "guest", authorization_result: "deny_not_in_admin_allowlist" };
+}
+
+export function isAuthorizedForPrivateTask(auth = {}) {
+  return auth.role === "admin";
+}
+
+function unauthorizedReply() {
+  return "我目前只接受已授權的管理者使用私人助理功能。這則訊息我不會記錄或處理。";
+}
+
+export async function idempotencyKeyForEvent(event = {}) {
+  const userId = sourceUserId(event) || "unknown-user";
+  const messageId = lineMessageId(event);
+  const webhookEventId = typeof event.webhookEventId === "string" ? event.webhookEventId : "";
+  const basis = messageId
+    ? `${ENVIRONMENT}:line:${userId}:${messageId}`
+    : `${ENVIRONMENT}:line:webhook:${webhookEventId || "unknown-event"}`;
+  return {
+    idempotency_key: basis,
+    idempotency_hash: (await sha256Hex(basis)).slice(0, 32),
+    idempotency_basis: messageId ? "environment_channel_source_user_id_line_message_id" : "environment_webhook_event_id",
+  };
+}
+
+function taskIdFromIdempotency(idempotencyHash) {
+  return `task-${idempotencyHash}`;
+}
+
+function normalizeText(text = "") {
+  return String(text).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function operationFingerprintParts(text = "") {
+  const normalized = normalizeText(text);
+  let operation = null;
+  let target = normalized;
+  if (/^(記一下|幫我記下|幫我記|記下|新增想法|保存想法|備忘)/.test(normalized)) {
+    operation = "idea_save";
+    target = normalized.replace(/^(記一下|幫我記下|幫我記|記下|新增想法|保存想法|備忘)[，,：:\\s]*/u, "").trim();
+  } else if (/^(刪除|移除)/.test(normalized)) {
+    operation = "idea_delete";
+  } else if (/^(修改|更改|改成|更新)/.test(normalized)) {
+    operation = "idea_update";
+  } else if (/(部署|發送|寫入|建立檔案|修改檔案|刪除檔案)/.test(normalized)) {
+    operation = "side_effect";
+  }
+  return operation ? { operation, target: target || normalized } : null;
+}
+
+export async function operationFingerprintForTask(event = {}) {
+  const parts = operationFingerprintParts(event.message?.text || "");
+  if (!parts) return null;
+  const userId = sourceUserId(event) || "unknown-user";
+  const basis = `${ENVIRONMENT}:line:${userId}:${parts.operation}:${parts.target}`;
+  return {
+    ...parts,
+    operation_fingerprint: (await sha256Hex(basis)).slice(0, 32),
+  };
 }
 
 function executorStatusKey(env = {}) {
@@ -139,18 +236,53 @@ export async function writeInboxTask(event, env, request = null) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
     : typeof event.replyToken === "string" ? event.replyToken : `event-${Date.now()}`;
-  const id = taskId(event, lineEventId);
+  const idempotency = await idempotencyKeyForEvent(event);
+  const id = taskIdFromIdempotency(idempotency.idempotency_hash) || taskId(event, lineEventId);
   const mode = executionMode(event.message.text);
   const displayId = displayTaskId();
   const createdAt = taipeiNow();
+  const auth = resolveRole(event, env);
   const executorStatus = await readExecutorStatus(env);
   const queuedWhileOffline = !executorStatus.online;
   const plannedWake = wakePlan(env, request, queuedWhileOffline, createdAt);
   const key = `pending/${id}.json`;
-  const seenKey = `events/${lineEventId}`;
+  const seenKey = `events/${idempotency.idempotency_hash}`;
+  const idempotencyIndexKey = `idempotency/${idempotency.idempotency_hash}`;
+  if (!env.CODEX_INBOX) throw new Error("CODEX_INBOX binding is missing");
+  const existingIdempotency = await env.CODEX_INBOX.get(idempotencyIndexKey, "json").catch(() => null);
+  if (existingIdempotency) return { duplicate: true, duplicate_task_id: existingIdempotency.task_id || id };
+  const operation = await operationFingerprintForTask(event);
+  const operationKey = operation ? `operation-fingerprints/${operation.operation_fingerprint}` : null;
+  const userId = sourceUserId(event);
+  const duplicateOperation = operationKey && env.CODEX_INBOX
+    ? await env.CODEX_INBOX.get(operationKey, "json").catch(() => null)
+    : null;
+  if (duplicateOperation) {
+    await env.CODEX_INBOX.put(seenKey, id);
+    await env.CODEX_INBOX.put(idempotencyIndexKey, JSON.stringify({
+      task_id: duplicateOperation.task_id || null,
+      status: "duplicate_operation_blocked",
+      created_at: createdAt,
+    }));
+    return {
+      duplicate: true,
+      duplicate_operation: true,
+      duplicate_task_id: duplicateOperation.task_id || null,
+      duplicate_status: duplicateOperation.status || "processing",
+      ack_user_message: duplicateOperation.status === "completed"
+        ? "我剛剛已經記過同一個內容了，這次不會再重複新增。"
+        : "我剛剛已經收到同一個內容，正在處理中，這次不會再重複新增。",
+    };
+  }
   const task = {
     task_id: id,
     display_task_id: displayId,
+    idempotency_key: idempotency.idempotency_key,
+    idempotency_hash: idempotency.idempotency_hash,
+    idempotency_basis: idempotency.idempotency_basis,
+    operation_fingerprint: operation?.operation_fingerprint || null,
+    operation_type: operation?.operation || null,
+    operation_target: operation?.target || null,
     execution_mode: mode,
     ack_user_message: ackUserMessageWithExecutor(event.message.text, mode, displayId, executorStatus),
     wake_endpoint_configured: Boolean(wakeUrl(env)),
@@ -161,9 +293,18 @@ export async function writeInboxTask(event, env, request = null) {
     progress_stage: mode === "long" ? "queued" : null,
     progress_user_message: null,
     line_event_id: lineEventId,
+    webhook_event_id: lineEventId,
+    line_message_id: lineMessageId(event) || null,
     text: event.message.text,
     original_text: event.message.text,
-    ...(typeof event.source?.userId === "string" ? { user_id: event.source.userId } : {}),
+    ...(userId ? { user_id: userId, source_user_id: userId } : {}),
+    source_user_fingerprint: await shortFingerprint(userId),
+    source_type: sourceType(event),
+    reply_token_fingerprint: await shortFingerprint(event.replyToken || ""),
+    environment: ENVIRONMENT,
+    resolved_role: auth.role,
+    authorization_result: auth.authorization_result,
+    authorization_checked_at: createdAt,
     source: "LINE",
     status: "pending",
     received_at: createdAt,
@@ -180,16 +321,44 @@ export async function writeInboxTask(event, env, request = null) {
     version: WORKER_VERSION,
   };
 
-  if (!env.CODEX_INBOX) throw new Error("CODEX_INBOX binding is missing");
-  if (await env.CODEX_INBOX.get(seenKey)) return { duplicate: true };
   await env.CODEX_INBOX.put(seenKey, id);
+  await env.CODEX_INBOX.put(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "pending", created_at: createdAt }));
+  if (operationKey) {
+    await env.CODEX_INBOX.put(operationKey, JSON.stringify({
+      task_id: id,
+      status: "processing",
+      operation_type: operation.operation,
+      created_at: createdAt,
+    }), { expirationTtl: OPERATION_FINGERPRINT_TTL_SECONDS });
+  }
   await env.CODEX_INBOX.put(key, JSON.stringify(task));
   return { duplicate: false, task };
 }
 
-async function replyToLine(event, env, task) {
+async function recordAuthEvent(event, env, auth, idempotency) {
+  if (!env.CODEX_INBOX) return;
+  const checkedAt = taipeiNow();
+  const userId = sourceUserId(event);
+  await env.CODEX_INBOX.put(`auth-events/${idempotency.idempotency_hash}`, JSON.stringify({
+    environment: ENVIRONMENT,
+    channel: "line",
+    source_user_id: userId || null,
+    source_user_fingerprint: await shortFingerprint(userId),
+    source_type: sourceType(event),
+    line_event_id: typeof event.webhookEventId === "string" ? event.webhookEventId : null,
+    line_message_id: lineMessageId(event) || null,
+    idempotency_hash: idempotency.idempotency_hash,
+    resolved_role: auth.role,
+    authorization_result: auth.authorization_result,
+    authorization_checked_at: checkedAt,
+  }), { expirationTtl: 60 * 60 * 24 * 30 });
+}
+
+async function replyToLine(event, env, taskOrText) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) throw new Error("LINE_CHANNEL_ACCESS_TOKEN binding is missing");
-  const text = task?.ack_user_message || ackUserMessage(event.message.text, task?.execution_mode, task?.display_task_id);
+  const text = typeof taskOrText === "string"
+    ? taskOrText
+    : taskOrText?.ack_user_message || ackUserMessage(event.message.text, taskOrText?.execution_mode, taskOrText?.display_task_id);
   const response = await fetch(LINE_REPLY_API_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
@@ -236,7 +405,7 @@ function wakeMonitorSoon(task, env = {}, ctx, request = null) {
   else void wake;
 }
 
-async function pushLineText(taskId, text, env) {
+async function pushLineText(taskId, text, env, pushType = "final") {
   const task = taskId && env.CODEX_INBOX
     ? (await env.CODEX_INBOX.get(`completed/${taskId}.json`, "json"))
       || (await env.CODEX_INBOX.get(`processing/${taskId}.json`, "json"))
@@ -244,11 +413,24 @@ async function pushLineText(taskId, text, env) {
     : null;
   if (!task?.user_id || typeof text !== "string" || !text.trim()) return json({ ok: false, error: "missing_task_target" }, 400);
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) return json({ ok: false, error: "missing_runtime_binding" }, 500);
+  const pushBasis = task.idempotency_hash || task.task_id || taskId;
+  const pushKey = `push-idempotency/${pushType}/${pushBasis}`;
+  const existingPush = pushType === "final" ? await env.CODEX_INBOX.get(pushKey, "json").catch(() => null) : null;
+  if (existingPush?.status === "sent") return json({ ok: true, duplicate: true, status: existingPush.http_status || 200 });
   const response = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ to: task.user_id, messages: [{ type: "text", text }] }),
   });
+  if (pushType === "final" && response.ok) {
+    await env.CODEX_INBOX.put(pushKey, JSON.stringify({
+      task_id: task.task_id || taskId,
+      idempotency_hash: task.idempotency_hash || null,
+      status: "sent",
+      http_status: response.status,
+      pushed_at: taipeiNow(),
+    }), { expirationTtl: 60 * 60 * 24 * 30 });
+  }
   return json({ ok: response.ok, status: response.status });
 }
 
@@ -258,12 +440,12 @@ export default {
     if (request.method === "POST" && new URL(request.url).pathname === "/internal/final-push") {
       let body;
       try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
-      return pushLineText(body?.task_id, body?.text, env);
+      return pushLineText(body?.task_id, body?.text, env, "final");
     }
     if (request.method === "POST" && new URL(request.url).pathname === "/internal/progress-push") {
       let body;
       try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
-      return pushLineText(body?.task_id, body?.text, env);
+      return pushLineText(body?.task_id, body?.text, env, "progress");
     }
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     let payload;
@@ -271,8 +453,21 @@ export default {
     for (const event of Array.isArray(payload.events) ? payload.events : []) {
       if (event?.type !== "message" || event?.message?.type !== "text" || typeof event.replyToken !== "string") continue;
       try {
+        const idempotency = await idempotencyKeyForEvent(event);
+        const auth = resolveRole(event, env);
+        if (!isAuthorizedForPrivateTask(auth)) {
+          const existingAuthEvent = env.CODEX_INBOX
+            ? await env.CODEX_INBOX.get(`auth-events/${idempotency.idempotency_hash}`, "json").catch(() => null)
+            : null;
+          if (existingAuthEvent) continue;
+          await recordAuthEvent(event, env, auth, idempotency);
+          await replyToLine(event, env, unauthorizedReply());
+          continue;
+        }
         const result = await writeInboxTask(event, env, request);
-        if (!result.duplicate) {
+        if (result.duplicate_operation && result.ack_user_message) {
+          await replyToLine(event, env, result.ack_user_message);
+        } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
             console.log("monitor_wake_skipped", { reason: result.task.wake_skip_reason || "wake_not_scheduled" });
           } else {

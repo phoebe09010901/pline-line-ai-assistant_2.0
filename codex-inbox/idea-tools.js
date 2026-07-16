@@ -51,7 +51,21 @@ function matchesPeriod(idea, period) {
 }
 
 function parseArgs(argv) {
-  const options = { command: argv[2], query: "", text: "", file: "", latest: false, period: "all" };
+  const options = {
+    command: argv[2],
+    query: "",
+    text: "",
+    file: "",
+    latest: false,
+    period: "all",
+    idempotencyKey: "",
+    operationFingerprint: "",
+    sourceEventId: "",
+    sourceMessageId: "",
+    sourceUserId: "",
+    sourceUserFingerprint: "",
+    taskId: "",
+  };
   for (let index = 3; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--query") options.query = argv[++index] || "";
@@ -59,6 +73,13 @@ function parseArgs(argv) {
     else if (arg === "--file") options.file = argv[++index] || "";
     else if (arg === "--latest") options.latest = true;
     else if (arg === "--period") options.period = argv[++index] || "all";
+    else if (arg === "--idempotency-key") options.idempotencyKey = argv[++index] || "";
+    else if (arg === "--operation-fingerprint") options.operationFingerprint = argv[++index] || "";
+    else if (arg === "--source-event-id") options.sourceEventId = argv[++index] || "";
+    else if (arg === "--source-message-id") options.sourceMessageId = argv[++index] || "";
+    else if (arg === "--source-user-id") options.sourceUserId = argv[++index] || "";
+    else if (arg === "--source-user-fingerprint") options.sourceUserFingerprint = argv[++index] || "";
+    else if (arg === "--task-id") options.taskId = argv[++index] || "";
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
@@ -108,6 +129,75 @@ export async function listIdeasForPeriod(period = "all", dir = IDEA_DIR) {
   return (await listIdeas(dir)).filter((idea) => matchesPeriod(idea, period));
 }
 
+function ideaTimestampForFile() {
+  const parts = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
+  return `${values.year}-${values.month}-${values.day}_${values.hour}${values.minute}${values.second}`;
+}
+
+function duplicateSaveCandidate(ideas, options) {
+  return ideas.find((idea) => {
+    if (options.idempotencyKey && idea.data.idempotency_key === options.idempotencyKey) return true;
+    if (options.operationFingerprint && idea.data.operation_fingerprint === options.operationFingerprint) return true;
+    return false;
+  }) || null;
+}
+
+export async function saveIdea(options, dir = IDEA_DIR) {
+  if (!options?.text) throw new Error("Missing idea text");
+  await fs.mkdir(dir, { recursive: true });
+  const ideas = await listIdeas(dir);
+  const duplicate = duplicateSaveCandidate(ideas, options);
+  if (duplicate) {
+    return {
+      ok: true,
+      action: "save",
+      duplicate: true,
+      file: duplicate.file,
+      text: duplicate.text,
+      idempotency_key: options.idempotencyKey || null,
+      operation_fingerprint: options.operationFingerprint || null,
+      dir,
+    };
+  }
+  const data = {
+    text: options.text,
+    original_text: options.text,
+    created_at: taipeiNow(),
+    source: "line",
+    task_id: options.taskId || null,
+    source_event_id: options.sourceEventId || null,
+    source_message_id: options.sourceMessageId || null,
+    source_user_id: options.sourceUserId || null,
+    source_user_fingerprint: options.sourceUserFingerprint || null,
+    idempotency_key: options.idempotencyKey || null,
+    operation_fingerprint: options.operationFingerprint || null,
+  };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const suffix = attempt ? `_${attempt}` : "";
+    const file = `idea_${ideaTimestampForFile()}${suffix}.json`;
+    const filePath = path.join(dir, file);
+    try {
+      const handle = await fs.open(filePath, "wx");
+      await handle.writeFile(`${JSON.stringify(data, null, 2)}\n`);
+      await handle.close();
+      return { ok: true, action: "save", duplicate: false, file, text: options.text, idempotency_key: options.idempotencyKey || null, operation_fingerprint: options.operationFingerprint || null, dir };
+    } catch (error) {
+      if (error?.code !== "EEXIST" || attempt === 4) throw error;
+    }
+  }
+  throw new Error("Unable to create idea file");
+}
+
 export async function updateIdea(options, dir = IDEA_DIR) {
   if (!options?.text) throw new Error("Missing replacement text");
   const target = await resolveTarget(options, dir);
@@ -131,17 +221,19 @@ export async function deleteIdea(options, dir = IDEA_DIR, deletedDir = DELETED_D
 
 async function main() {
   const options = parseArgs(process.argv);
-  if (!["search", "update", "delete"].includes(options.command)) {
-    throw new Error("Usage: node codex-inbox/idea-tools.js search|update|delete [--query text] [--period all|day|month|year] [--text text] [--file idea_...json] [--latest]");
+  if (!["search", "save", "update", "delete"].includes(options.command)) {
+    throw new Error("Usage: node codex-inbox/idea-tools.js search|save|update|delete [--query text] [--period all|day|month|year] [--text text] [--file idea_...json] [--latest]");
   }
   const matches = options.command === "search"
     ? (await searchIdeas(options.query)).filter((idea) => matchesPeriod(idea, options.period))
     : null;
   const result = matches
     ? { ok: true, action: "search", count: matches.length, items: matches.slice(0, 10).map((idea) => ({ file: idea.file, text: idea.text, created_at: idea.data.created_at || null })) }
-    : options.command === "update"
-      ? await updateIdea(options)
-      : await deleteIdea(options);
+    : options.command === "save"
+      ? await saveIdea(options)
+      : options.command === "update"
+        ? await updateIdea(options)
+        : await deleteIdea(options);
   console.log(JSON.stringify(result, null, 2));
 }
 
