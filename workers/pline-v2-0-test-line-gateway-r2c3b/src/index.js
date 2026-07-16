@@ -1,12 +1,24 @@
 const LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply";
 const N8N_WEBHOOK_URL = "https://n8nphy.app.n8n.cloud/webhook/pline-v2-0-test";
-const LOCAL_QUERY_API_URL = "https://provide-defined-tim-contributions.trycloudflare.com/query";
+const LOCAL_QUERY_API_URL = "https://breeding-associates-eagles-solomon.trycloudflare.com/query";
 const FIXED_REPLY_TEXT = "記好了 ✨";
 const QUERY_ERROR_TEXT = "查詢暫時沒有成功，請稍後再試一次 🙏";
+const CLARIFY_TEXT = "我不太確定妳是要記錄、查詢，還是修改，可以再說清楚一點嗎？✨";
 const CLASSIFIED_RECORD_PATTERN = /［(網站|報價|課程)］\s*/;
+const CHINESE_NUMBERS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 
 const COUNT_DAY_PHRASES = [
+  "今天記了幾筆",
+  "今天有幾筆",
+  "今天記錄了幾筆",
   "我今天記了幾筆",
+  "今天有多少筆紀錄",
+  "今天有多少筆想法",
+  "阿光現在有幾筆紀錄了",
+  "現在記了幾筆",
+  "目前有幾筆想法",
+  "你幫我記了幾筆",
+  "我是問你現在紀錄了幾筆",
   "今天有幾個想法",
   "今天記錄幾筆",
   "今天的備忘數量",
@@ -19,6 +31,7 @@ const LIST_DAY_PHRASES = [
 ];
 const COUNT_MONTH_PHRASES = [
   "我這個月記了幾筆",
+  "本月記了幾筆",
   "本月有幾個想法",
   "本月記錄幾筆",
 ];
@@ -29,6 +42,7 @@ const LIST_MONTH_PHRASES = [
 ];
 const COUNT_YEAR_PHRASES = [
   "我今年記了幾筆",
+  "今年記了幾筆",
   "今年有幾個想法",
   "今年記錄幾筆",
 ];
@@ -97,7 +111,13 @@ async function getReplyTextFromN8n(text) {
     }
 
     console.log("n8n_forward", { status: response.status });
-    const result = await response.json();
+    const raw = await response.text();
+    let result = null;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      return FIXED_REPLY_TEXT;
+    }
     if (
       result?.ok === true &&
       result?.version === "V2.0" &&
@@ -106,7 +126,9 @@ async function getReplyTextFromN8n(text) {
     ) {
       return result.reply_text;
     }
-    return null;
+    // A successful V2.0 record may return only its transport/result envelope.
+    // The record flow already completed at HTTP 200, so keep its fixed reply.
+    return FIXED_REPLY_TEXT;
   } catch (error) {
     console.error("n8n_forward_failed", {
       status: "network_error",
@@ -116,34 +138,79 @@ async function getReplyTextFromN8n(text) {
   }
 }
 
+function parseIndex(text) {
+  if (/(剛才|剛剛|最近|最新).{0,6}(那筆|想法|記錄)/.test(text)) return 1;
+  const match = text.match(/(?:第\s*)?([一二三四五六七八九十]|\d+)\s*(?:筆|個|項)/);
+  return match ? (Number(match[1]) || CHINESE_NUMBERS[match[1]] || null) : null;
+}
+
+function periodFor(text) {
+  if (text.includes("本月") || text.includes("這個月")) return "month";
+  if (text.includes("今年")) return "year";
+  if (text.includes("所有") || text.includes("全部") || text.includes("全量") || text.includes("目前的想法")) return "all";
+  if (text.includes("最近") || text.includes("最新")) return "recent";
+  if (text.includes("今天") || text.includes("現在") || text.includes("目前") || text.includes("剛才") || text.includes("剛剛")) return "day";
+  return "all";
+}
+
+function countAction(text) {
+  const period = periodFor(text);
+  return { action: period === "month" ? "count_month" : period === "year" ? "count_year" : period === "all" ? "count_all" : "count_day" };
+}
+
+function listActionForPeriod(text) {
+  const period = periodFor(text);
+  if (period === "month") return "list_month";
+  if (period === "year") return "list_year";
+  if (period === "recent") return "list_recent";
+  if (period === "all") return "list_all";
+  return "list_day";
+}
+
+function extractKeyword(text) {
+  const match = text.match(/(?:搜尋|找)(.+?)(?:相關的?想法|有關的?想法|的想法|的紀錄|$)/);
+  return match?.[1]?.trim() || "";
+}
+
+function classifyIntent(text) {
+  const index = parseIndex(text);
+  const hasOperation = /(幾筆|多少筆|紀錄數量|列出|給我看|有哪些|目前的想法|所有想法|最近想法|查看|看|搜尋|找|修改|改成|改為|刪除|刪掉|派給\s*Codex|交給\s*Codex|請\s*Codex|第\s*[一二三四五六七八九十\d]+\s*(筆|個|項)|剛才那筆|剛剛那筆|最近那筆)/i.test(text);
+  if (/(幾筆|多少(?:筆|個|東西|紀錄|想法)|紀錄數量)/.test(text)) return countAction(text);
+  if (/(刪除|刪掉)/.test(text)) return index ? { action: "delete_item", index } : { action: "clarify" };
+  if (/(派給\s*Codex|交給\s*Codex|請\s*Codex)/i.test(text)) return index ? { action: "codex_task", index } : { action: "clarify" };
+  if (/(修改|改成|改為)/.test(text)) {
+    const updatedText = text.match(/(?:改成|改為|修改.+?為)(.+)$/)?.[1]?.trim();
+    return index && updatedText ? { action: "update_item", index, text: updatedText } : { action: "clarify" };
+  }
+  if (text.includes("搜尋分類")) return { action: "search_category", category: text.replace(/^.*搜尋分類/, "").trim() };
+  const categoryMatch = text.match(/(?:列出|搜尋|把)?\s*(網站|報價|課程)(?:的)?類?(?:想法|紀錄)/);
+  if (categoryMatch && /(列出|搜尋|紀錄|想法)/.test(text)) return { action: "search_category", category: categoryMatch[1] };
+  if (/(查看|看|詳細內容)/.test(text) && index) return { action: "get_item", index };
+  if (/(列出|給我看|有哪些|目前的想法|所有想法|最近想法|最近記了什麼)/.test(text)) return { action: listActionForPeriod(text) };
+  if (/(搜尋|找)/.test(text)) {
+    const keyword = extractKeyword(text);
+    return keyword ? { action: "search", keyword } : { action: "clarify" };
+  }
+  if (hasOperation) return { action: "clarify" };
+  if (/(記一下|幫我記|記錄|新增想法|我想到)/.test(text)) return { action: "record_intent" };
+  return { action: "clarify" };
+}
+
 function queryAction(text) {
-  if (COUNT_DAY_PHRASES.some((phrase) => text.includes(phrase))) return "count_day";
-  if (LIST_DAY_PHRASES.some((phrase) => text.includes(phrase))) return "list_day";
-  if (COUNT_MONTH_PHRASES.some((phrase) => text.includes(phrase))) return "count_month";
-  if (LIST_MONTH_PHRASES.some((phrase) => text.includes(phrase))) return "list_month";
-  if (COUNT_YEAR_PHRASES.some((phrase) => text.includes(phrase))) return "count_year";
-  if (LIST_YEAR_PHRASES.some((phrase) => text.includes(phrase))) return "list_year";
-  return null;
+  const result = classifyIntent(text);
+  return result.action === "record_intent" || result.action === "clarify" ? null : result.action;
+}
+
+function legacyListActionForPeriod(text) {
+  if (text.includes("本月")) return "list_month";
+  if (text.includes("今年")) return "list_year";
+  if (text.includes("今天")) return "list_day";
+  return "list_year";
 }
 
 function directQuery(text) {
-  let match = text.match(/^列出(.+?)類想法$/);
-  if (match) return { action: "search_category", category: match[1] };
-  match = text.match(/^搜尋分類(.+)$/);
-  if (match) return { action: "search_category", category: match[1] };
-  match = text.match(/^幫我找跟(.+?)有關的想法$/);
-  if (match) return { action: "search", keyword: match[1] };
-  match = text.match(/^(?:搜尋|找)(.+)$/);
-  if (match) return { action: "search", keyword: match[1] };
-  match = text.match(/^(?:看|查看)第\s*(\d+)\s*筆$/);
-  if (match) return { action: "get_item", index: Number(match[1]) };
-  match = text.match(/^(?:把第\s*(\d+)\s*筆改成|修改第\s*(\d+)\s*筆為)(.+)$/);
-  if (match) return { action: "update_item", index: Number(match[1] || match[2]), text: match[3].trim() };
-  match = text.match(/^(?:刪除第\s*(\d+)\s*筆|把第\s*(\d+)\s*筆刪掉)$/);
-  if (match) return { action: "delete_item", index: Number(match[1] || match[2]) };
-  match = text.match(/^(?:把第\s*(\d+)\s*筆派給 Codex|請 Codex 分析第\s*(\d+)\s*筆)$/);
-  if (match) return { action: "codex_task", index: Number(match[1] || match[2]) };
-  return null;
+  const result = classifyIntent(text);
+  return result.action === "record_intent" || result.action === "clarify" ? null : result;
 }
 
 function classifiedRecordQuery(text) {
@@ -215,16 +282,15 @@ export default {
           typeof event.replyToken === "string" &&
           event.replyToken.length > 0
         ) {
-          const action = queryAction(event.message.text);
+          const intent = classifyIntent(event.message.text);
           const classifiedRecord = classifiedRecordQuery(event.message.text);
-          const directQueryRequest = directQuery(event.message.text);
           const replyText = classifiedRecord
             ? await getReplyTextFromQuery(classifiedRecord)
-            : directQueryRequest
-              ? await getReplyTextFromQuery(directQueryRequest)
-            : action
-              ? await getReplyTextFromQuery({ action })
-              : (await getReplyTextFromN8n(event.message.text)) || FIXED_REPLY_TEXT;
+            : intent.action === "record_intent"
+              ? await getReplyTextFromN8n(event.message.text) || QUERY_ERROR_TEXT
+              : intent.action === "clarify"
+                ? CLARIFY_TEXT
+                : await getReplyTextFromQuery(intent);
           await replyToLine(event.replyToken, replyText, env);
         }
       }),

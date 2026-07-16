@@ -98,7 +98,7 @@ async function searchItems(keyword) {
 }
 
 function visibleItems(items) {
-  return items.map(({ id, text, created_at }) => ({ id, text, created_at }));
+  return items.map(({ id, text, created_at, data }) => ({ id, text, created_at, category: data?.category || "" }));
 }
 
 function numberedReply(title, items) {
@@ -108,6 +108,22 @@ function numberedReply(title, items) {
 async function searchCategory(category) {
   const items = await searchItems(category);
   return items.filter((item) => item.data.category === category);
+}
+
+async function allItems() {
+  const names = await fs.readdir(DATA_DIR);
+  const items = [];
+  for (const name of names.filter((value) => FILE_PATTERN.test(value))) {
+    const file = path.join(DATA_DIR, name);
+    try {
+      const data = JSON.parse(await fs.readFile(file, "utf8"));
+      const text = typeof data.text === "string" ? data.text : data.original_text;
+      if (typeof text === "string") items.push({ id: name, file, data, text, created_at: data.created_at || null });
+    } catch {
+      // Ignore incomplete or invalid synced files.
+    }
+  }
+  return items.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
 }
 
 function selectedItem(index) {
@@ -224,6 +240,19 @@ async function handleQuery(body) {
         reply_text: items.length ? numberedReply(`找到 ${items.length} 筆「${category}」分類記錄：`, limited) : `沒有找到「${category}」分類的記錄喔 ✨`,
       },
     };
+  }
+
+  if (action === "list_all" || action === "list_recent") {
+    const items = await allItems();
+    recentSearchResults = items;
+    const limited = items.slice(0, 10);
+    const label = action === "list_recent" ? "最近記錄：" : "所有想法：";
+    return { status: 200, body: { ok: true, action, count: items.length, items: visibleItems(limited), reply_text: limited.length ? numberedReply(label, limited) : "目前還沒有記錄想法喔 ✨" } };
+  }
+
+  if (action === "count_all") {
+    const items = await allItems();
+    return { status: 200, body: { ok: true, action, count: items.length, reply_text: `目前共記錄 ${items.length} 筆 ✨` } };
   }
 
   if (["get_item", "update_item", "delete_item", "codex_task"].includes(action)) {
