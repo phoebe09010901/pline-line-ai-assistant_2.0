@@ -4,44 +4,75 @@
 
 ---
 
-## V3 mainline baseline note
+## V3.0 mainline baseline note
 
-本輪文件結論以 V3 mainline 為準，不以舊 V2 / 第一版 Dropbox baseline 作為本輪結論。
+本輪文件結論以 V3.0 closed-loop verification 為準，不以舊 V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
 
-### V3 receive-only live checkpoint
+### V3.0 真實閉環驗收
 
-V3.0 Codex LINE Inbox 已完成 RELEASE，但本次只保存 receive-only checkpoint。
+V3.0 Codex LINE Inbox 已完成真實單筆 / 三筆閉環驗收。
 
 - existing release commit：`7287cf5f254ca45782d7f5b262b1e698f16e7622`
 - existing tag：`v3.0-codex-line-inbox-complete`
-- 以上 commit / tag 保留
-- TEST LINE 三則真實訊息均收到 `收到，已交給 Codex ✨`
+- 真實使用 checkpoint tag：`v3.0-inbox-receive-checkpoint`
+- branch：`v3/codex-line-inbox`
 - LINE Webhook 接收 PASS
-- 即時 ACK PASS
-- duplicate reply 初步為 0
-- Codex inbox task 是否實際建立待檔案核對
-- Codex monitor 常駐 / 領取 / 自主理解 / 工具執行尚未證實
-- 尚未收到第二段 Codex 最終執行結果，final LINE result 不得標 PASS
-- checkpoint 定位：`LINE 收件段完成，Codex 後段執行尚待修正`
-- 不描述為 V3 全流程完成
-- 本輪尚未修正 monitor、Worker、local-query-api、n8n
+- LINE 即時 ACK `收到，已交給 Codex ✨` PASS，三筆各 1 次
+- inbox 狀態結構與競態驗收已有 PASS 證據
+- duplicate execution = 0
+- Codex monitor 真正常駐 PASS，本輪 monitor 已 claim 三筆任務
+- Codex 實際執行 PASS，本輪完成 Dropbox 寫入 / 想法查詢 / 專案狀態查詢
+- Codex 使用工具完成任務 PASS
+- LINE 第二段最終結果回覆 PASS，三筆 final push HTTP 200，且 LINE UI 顯示自然 `final_user_message`
+- duplicate task / execution / ACK / final push：0 / 0 / 0 / 0
+- 最終 KV：pending / processing 皆空；三筆只在 completed，failed 無新增
 
-### 明日唯一主線
+### V3.0 FIX 完成內容
 
-只查明真實 LINE 任務停點，確認 remote task 狀態為 pending / processing / completed / failed 的哪一層，確認 Codex monitor 是否真正常駐，只修真正故障層。
+- FIX thread id：`019f6941-2862-7602-8b91-c38870711703`
+- FIX turn id：`019f696c-b985-7d23-be00-30e45e913667`
+- 修改檔案：`codex-inbox/monitor.js`
+- Codex prompt 要求最後輸出 JSON object：`technical_summary` + `final_user_message`
+- `technical_summary` 只保存於 completed task / legacy result_summary，不推 LINE
+- LINE final push 唯一內容來源為 `final_user_message`
+- 若 `final_user_message` 空白、過長、含本機路徑、Markdown link、JSON 檔名、task_id、stdout/stderr/PID、明顯 secret/token 字樣，task failed，不推 `technical_summary`
+- 保留 stdin ignore / `--output-last-message` 修正
+- LaunchAgent 已重啟：`com.pline.v3-codex-inbox-monitor`，PID `60764`
 
-目標是完成單筆：
+### V3.0 TEST 完成內容
+
+- TEST thread id：`019f6940-ff63-7392-8dab-d285f4f44928`
+- TEST turn id：`019f6971-1f57-7313-b4cf-a5ed0f480d59`
+- WORKER_STATUS：completed
+- ORCHESTRATOR_NOTIFY：no
+- ORCHESTRATOR_MESSAGE：Codex 自行撰寫 LINE 友善最終回覆已 PASS，不需續派。
+
+三筆真實 LINE 測試：
+
+1. `01KXMQ4DER98X2D302NNQNJZ6S`：`幫我記下，LINE 回覆格式已經變簡單了`
+   狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段：`已幫你記下這個備忘：LINE 回覆格式已經變簡單了。` 工具結果：Dropbox JSON +1，新增 `idea_2026-07-16_13-43-36.json`。
+2. `01KXMQCKYXPN2T3T2HK92K60DM`：`幫我找和會員登入有關的想法`
+   狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段為自然查詢結果，找到 2 筆和「會員」較相關的想法，並說明目前沒有直接找到「會員登入」或 login。工具結果：查詢既有想法資料，Dropbox JSON +0。
+3. `01KXMQH9J4GEG42CJB2SA0GFH8`：`幫我查看菲比股市練功房目前做到哪裡`
+   狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段自然摘要股市練功房目前完成的報表、儀表板、三大法人、學習資料庫、VCP 模組、PDF 報表與下一步補強方向。工具結果：只讀查詢專案狀態與資料，Dropbox JSON +0。
+
+三筆皆符合：
+
+- `technical_summary` 已保存，未推 LINE
+- LINE 第二段皆只顯示 `final_user_message`
+- 未顯示 `/Users/phoebe`、`.json`、Markdown link、`original_text`、`task_id`、stdout、stderr、exit code 或工程描述
+
+### 目前已完成主線
 
 ```text
-LINE → Codex → 工具執行 → LINE 第二段結果
+LINE → Codex → 工具執行 → LINE 第二段友善回覆
 ```
 
-目前不得誤標 PASS：
+### 仍不得誤標 PASS
 
-- Codex monitor 是否真正常駐
-- Codex 是否實際執行
-- Codex 是否使用工具完成任務
-- LINE 第二段最終結果回覆
+只將已真實驗收者標 PASS。未做的 release / push / 遠端驗證，不得寫成 PASS。
+
+本輪 DOC 未自行做新的 LINE 測試、未修改 Worker / n8n / inbox 架構、未碰 FORMAL、未處理 token / secret / credentials。
 
 ### V2 dirty 處理
 
@@ -68,7 +99,7 @@ LINE → Codex → 工具執行 → LINE 第二段結果
 - final race fix did not modify Worker
 - n8n / LINE Webhook not modified
 
-### TEST final V3 pass
+### V3 foundation 歷史驗收
 
 - TEST thread id：`019f6660-c0f0-7d32-ad8e-460f76b9a81c`
 - TEST turn id：`019f68b8-6f8d-7353-89db-59dd19df33c0`
@@ -95,9 +126,11 @@ LINE → Codex → 工具執行 → LINE 第二段結果
 - 原文完整保存到 remote KV pending task
 - monitor 可 claim KV pending，轉 processing / completed
 - failed archive 安全落到 failed，保留 `error_summary` / `retryable`，單一終態
-- duplicate event / reply / execution 均為 0
-- 尚未宣稱完整 Codex 自主工具選擇與完成後回覆 LINE 全面完成
-- 本輪是 V3 inbox / monitor foundation pass
+- Codex prompt 產生 `technical_summary` + `final_user_message`
+- `technical_summary` 只存內部紀錄，不推 LINE
+- LINE 第二段最終回覆唯一來源為 `final_user_message`
+- 三筆真實 LINE 測試已完成 `LINE → Codex → 工具執行 → LINE 第二段友善回覆`
+- duplicate task / execution / ACK / final push 均為 0
 
 ### V3 release baseline
 

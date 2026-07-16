@@ -4,6 +4,58 @@
 
 ## 2026-07-16
 
+### DOC｜LINE V3.0 閉環驗收後文件整理
+
+本輪 `PLine｜DOC｜文件與規格整理` 只更新四份允許文件，將目前狀態從 V3 receive-only checkpoint 更新為 V3.0 真實單筆 / 三筆閉環驗收完成。
+
+更新文件：
+
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+- `CODEX_NOTES.md`
+- `BASELINE.md`
+
+V2 / V3 基準：
+
+- V2.0 已完成並保存
+- V3 branch：`v3/codex-line-inbox`
+- V3 release commit：`7287cf5f254ca45782d7f5b262b1e698f16e7622`
+- V3 tag：`v3.0-codex-line-inbox-complete`
+- 真實使用 checkpoint tag：`v3.0-inbox-receive-checkpoint`
+
+已確認綠燈：
+
+- LINE Webhook 收件：PASS
+- LINE 即時 ACK `收到，已交給 Codex ✨`：PASS，三筆各 1 次
+- inbox 狀態結構與競態驗收：已有 PASS 證據
+- duplicate execution：0
+- Codex monitor 真正常駐：PASS，本輪 monitor 已 claim 三筆任務
+- Codex 實際執行：PASS，本輪完成 Dropbox 寫入 / 想法查詢 / 專案狀態查詢
+- Codex 使用工具完成任務：PASS，第一筆 Dropbox +1，第二 / 三筆完成查詢
+- LINE 第二段最終結果回覆：PASS，三筆 final push HTTP 200，且 LINE UI 顯示自然 `final_user_message`
+
+FIX 完成內容：
+
+- FIX thread id：`019f6941-2862-7602-8b91-c38870711703`
+- FIX turn id：`019f696c-b985-7d23-be00-30e45e913667`
+- 修改檔案：`codex-inbox/monitor.js`
+- Codex prompt 要求最後輸出 JSON object：`technical_summary` + `final_user_message`
+- `technical_summary` 只保存於 completed task / legacy result_summary，不推 LINE
+- LINE final push 唯一內容來源為 `final_user_message`
+- 若 `final_user_message` 空白、過長、含本機路徑、Markdown link、JSON 檔名、task_id、stdout/stderr/PID、明顯 secret/token 字樣，task failed，不推 `technical_summary`
+- 保留 stdin ignore / `--output-last-message` 修正
+- LaunchAgent 已重啟：`com.pline.v3-codex-inbox-monitor`，PID `60764`
+
+TEST 完成內容：
+
+- TEST thread id：`019f6940-ff63-7392-8dab-d285f4f44928`
+- TEST turn id：`019f6971-1f57-7313-b4cf-a5ed0f480d59`
+- WORKER_STATUS：completed
+- ORCHESTRATOR_NOTIFY：no
+- ORCHESTRATOR_MESSAGE：Codex 自行撰寫 LINE 友善最終回覆已 PASS，不需續派。
+
+---
+
 ### V3 receive-only live checkpoint
 
 V3.0 Codex LINE Inbox 已完成 RELEASE，但本次只保存 receive-only checkpoint。
