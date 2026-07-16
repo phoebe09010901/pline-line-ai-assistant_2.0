@@ -24,14 +24,41 @@ function taipeiNow() {
   return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}:${values.second}+08:00`;
 }
 
+function taipeiDateParts() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  return Object.fromEntries(parts.filter(({ type }) => type !== "literal").map(({ type, value }) => [type, value]));
+}
+
+function ideaDate(idea) {
+  const created = String(idea.data.created_at || "");
+  const createdDate = created.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  return createdDate || idea.file.match(/^idea_(\d{4}-\d{2}-\d{2})_/)?.[1] || "";
+}
+
+function matchesPeriod(idea, period) {
+  if (!period || period === "all") return true;
+  const { year, month, day } = taipeiDateParts();
+  const date = ideaDate(idea);
+  if (period === "day") return date === `${year}-${month}-${day}`;
+  if (period === "month") return date.startsWith(`${year}-${month}-`);
+  if (period === "year") return date.startsWith(`${year}-`);
+  return true;
+}
+
 function parseArgs(argv) {
-  const options = { command: argv[2], query: "", text: "", file: "", latest: false };
+  const options = { command: argv[2], query: "", text: "", file: "", latest: false, period: "all" };
   for (let index = 3; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--query") options.query = argv[++index] || "";
     else if (arg === "--text") options.text = argv[++index] || "";
     else if (arg === "--file") options.file = argv[++index] || "";
     else if (arg === "--latest") options.latest = true;
+    else if (arg === "--period") options.period = argv[++index] || "all";
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
@@ -77,6 +104,10 @@ export async function searchIdeas(query = "", dir = IDEA_DIR) {
   return query ? ideas.filter((idea) => `${idea.text}\n${idea.data.original_text || ""}`.includes(query)) : ideas;
 }
 
+export async function listIdeasForPeriod(period = "all", dir = IDEA_DIR) {
+  return (await listIdeas(dir)).filter((idea) => matchesPeriod(idea, period));
+}
+
 export async function updateIdea(options, dir = IDEA_DIR) {
   if (!options?.text) throw new Error("Missing replacement text");
   const target = await resolveTarget(options, dir);
@@ -101,9 +132,11 @@ export async function deleteIdea(options, dir = IDEA_DIR, deletedDir = DELETED_D
 async function main() {
   const options = parseArgs(process.argv);
   if (!["search", "update", "delete"].includes(options.command)) {
-    throw new Error("Usage: node codex-inbox/idea-tools.js search|update|delete [--query text] [--text text] [--file idea_...json] [--latest]");
+    throw new Error("Usage: node codex-inbox/idea-tools.js search|update|delete [--query text] [--period all|day|month|year] [--text text] [--file idea_...json] [--latest]");
   }
-  const matches = options.command === "search" ? await searchIdeas(options.query) : null;
+  const matches = options.command === "search"
+    ? (await searchIdeas(options.query)).filter((idea) => matchesPeriod(idea, options.period))
+    : null;
   const result = matches
     ? { ok: true, action: "search", count: matches.length, items: matches.slice(0, 10).map((idea) => ({ file: idea.file, text: idea.text, created_at: idea.data.created_at || null })) }
     : options.command === "update"

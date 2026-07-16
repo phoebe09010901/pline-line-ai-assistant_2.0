@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { listIdeasForPeriod } from "./idea-tools.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const INBOX_ROOT = ROOT;
@@ -19,12 +20,21 @@ const WAKE_HOST = process.env.CODEX_WAKE_HOST || "127.0.0.1";
 const WAKE_PORT = Number(process.env.CODEX_WAKE_PORT || 8793);
 const WAKE_TOKEN = process.env.CODEX_WAKE_TOKEN || "";
 const POLL_INTERVAL_MS = 60_000;
+const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 20_000);
+const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || "executor-status:test:default";
+const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
+const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || "test";
+const MONITOR_VERSION = "V3.3";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
 let rescanRequested = false;
 let triggerScanRunning = false;
+let executorRuntimeStatus = "online";
+let executorCurrentTaskId = null;
+let executorLastHeartbeatAt = null;
+let heartbeatInFlight = false;
 
 function isLocalAddress(address = "") {
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
@@ -72,7 +82,12 @@ export function createWakeServer(scan) {
       response.end(JSON.stringify({ ok: false, error: "unauthorized" }));
       return;
     }
+    const wakeReceivedAt = now();
     request.resume();
+    void writeExecutorStatusSafe(executorRuntimeStatus, executorCurrentTaskId, {
+      wake_received_at: wakeReceivedAt,
+      last_wake_received_at: wakeReceivedAt,
+    });
     void triggerScan(scan, "wake").catch((error) => console.error("wake_scan_failed", { summary: error instanceof Error ? error.message : String(error) }));
     response.writeHead(202, { "content-type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ ok: true, accepted: true }));
@@ -155,6 +170,7 @@ export async function scanOnce(handler = executeAndPush) {
       let claim;
       try { claim = await claimOne(file); } catch { continue; }
       try {
+        claim.task.execution_started_at = now();
         const result = await handler(claim.task);
         claim.task.status = "completed";
         claim.task.completed_at = now();
@@ -206,6 +222,77 @@ async function kvDelete(key) {
   await kvCommand(["delete", key]);
 }
 
+const defaultKvAdapter = {
+  list: kvList,
+  get: kvGet,
+  getOrNull: kvGetOrNull,
+  put: kvPut,
+  delete: kvDelete,
+};
+let kvAdapter = defaultKvAdapter;
+
+export function setKvAdapterForTests(adapter = {}) {
+  kvAdapter = { ...defaultKvAdapter, ...adapter };
+}
+
+export function resetKvAdapterForTests() {
+  kvAdapter = defaultKvAdapter;
+}
+
+function shouldWriteExecutorStatus() {
+  return process.env.CODEX_INBOX_MODE === "kv";
+}
+
+export function executorStatusPayload(status = "online", currentTaskId = null, extra = {}) {
+  const heartbeatAt = now();
+  return {
+    executor_id: EXECUTOR_ID,
+    environment: EXECUTOR_ENVIRONMENT,
+    status,
+    last_heartbeat_at: heartbeatAt,
+    current_task_id: currentTaskId || null,
+    monitor_version: MONITOR_VERSION,
+    fallback_poll_ms: POLL_INTERVAL_MS,
+    heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+    ...extra,
+  };
+}
+
+export async function writeExecutorStatus(status = executorRuntimeStatus, currentTaskId = executorCurrentTaskId, extra = {}) {
+  if (!shouldWriteExecutorStatus()) return null;
+  const payload = executorStatusPayload(status, currentTaskId, extra);
+  await kvAdapter.put(EXECUTOR_STATUS_KEY, JSON.stringify(payload));
+  executorLastHeartbeatAt = payload.last_heartbeat_at;
+  return payload;
+}
+
+export async function writeExecutorStatusSafe(status = executorRuntimeStatus, currentTaskId = executorCurrentTaskId, extra = {}) {
+  if (heartbeatInFlight) return null;
+  heartbeatInFlight = true;
+  try {
+    return await writeExecutorStatus(status, currentTaskId, extra);
+  } catch (error) {
+    console.error("executor_heartbeat_failed", { summary: error instanceof Error ? error.message : String(error) });
+    return null;
+  } finally {
+    heartbeatInFlight = false;
+  }
+}
+
+async function setExecutorRuntimeStatus(status = "online", currentTaskId = null, extra = {}) {
+  executorRuntimeStatus = status;
+  executorCurrentTaskId = currentTaskId || null;
+  return writeExecutorStatusSafe(status, executorCurrentTaskId, extra);
+}
+
+export function startExecutorHeartbeat() {
+  if (!shouldWriteExecutorStatus()) return null;
+  void writeExecutorStatusSafe("online", null, { started_at: now() });
+  return setInterval(() => {
+    void writeExecutorStatusSafe(executorRuntimeStatus, executorCurrentTaskId);
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
 function extractJsonObject(text) {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -217,7 +304,7 @@ function extractJsonObject(text) {
   return start >= 0 && end > start ? trimmed.slice(start, end + 1) : null;
 }
 
-function parseCodexResult(lastMessage, task) {
+export async function parseCodexResult(lastMessage, task) {
   const jsonText = extractJsonObject(lastMessage);
   if (!jsonText) throw new Error("Codex did not provide a parseable result object");
   let parsed;
@@ -231,14 +318,20 @@ function parseCodexResult(lastMessage, task) {
   const progressStage = typeof parsed.progress_stage === "string" ? parsed.progress_stage.trim() : "";
   const progressUserMessage = typeof parsed.progress_user_message === "string" ? parsed.progress_user_message.trim() : "";
   if (!technicalSummary) throw new Error("Codex did not provide technical_summary");
-  validateFinalUserMessage(finalUserMessage, task);
+  let safeFinalUserMessage = finalUserMessage;
+  try {
+    validateFinalUserMessage(safeFinalUserMessage, task);
+  } catch (error) {
+    if (!isIdeaListRequest(task)) throw error;
+    safeFinalUserMessage = await buildIdeaListUserMessage(task);
+  }
   if (task?.execution_mode === "long") {
     if (!progressStage) throw new Error("Codex did not provide progress_stage");
     validateFinalUserMessage(progressUserMessage, task);
   }
   return {
     technical_summary: technicalSummary.slice(0, 4_000),
-    final_user_message: finalUserMessage,
+    final_user_message: safeFinalUserMessage,
     progress_stage: progressStage || null,
     progress_user_message: progressUserMessage || null,
     result_status: "completed",
@@ -248,6 +341,54 @@ function parseCodexResult(lastMessage, task) {
 function allowsTechnicalDetails(task) {
   return /(?:技術細節|技術紀錄|工程紀錄|工程細節|debug|除錯|診斷|內部欄位|stdout|stderr|PID)/i
     .test(String(task?.original_text || ""));
+}
+
+function isIdeaListRequest(task = {}) {
+  const text = String(task?.original_text || "");
+  return /(?:列出|列表|查看|看|顯示).*(?:想法|則|全部|所有|來給我看)|(?:想法|則).*(?:列出|列表|查看|看|顯示)|可以列出來給我看嗎/.test(text);
+}
+
+function ideaListPeriod(task = {}) {
+  const text = String(task?.original_text || "");
+  if (/(?:今天|今日)/.test(text)) return { period: "day", label: "今天" };
+  if (/(?:本月|這個月|當月)/.test(text)) return { period: "month", label: "本月" };
+  if (/(?:今年|本年)/.test(text)) return { period: "year", label: "今年" };
+  return { period: "all", label: "" };
+}
+
+function sanitizeIdeaText(text) {
+  const clean = String(text || "")
+    .replace(/\/(?:Users|Volumes|tmp|var|opt|private|Applications)\/[^\s]+/g, "（已省略）")
+    .replace(/\bfile:\/\/[^\s]+/gi, "（已省略）")
+    .replace(/(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]{1,8}\b/g, "（已省略）")
+    .replace(/\[[^\]]+\]\([^)]+\)/g, "（已省略）")
+    .replace(/\b[\w.-]+\.json\b/gi, "（已省略）")
+    .replace(/\b(?:Codex|monitor|Worker|Gateway|task_id|original_text|stdout|stderr|exit code|PID|error_summary|variant|TTL)\b/gi, "（已省略）")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clean.length > 160 ? `${clean.slice(0, 157)}...` : clean;
+}
+
+export async function buildIdeaListUserMessage(task = {}) {
+  const { period, label } = ideaListPeriod(task);
+  const ideas = await listIdeasForPeriod(period, DROPBOX_DIR);
+  const scope = label ? `${label}的` : "";
+  if (!ideas.length) return `我目前沒有找到${scope}已記下的想法。`;
+  const items = ideas
+    .map((idea) => sanitizeIdeaText(idea.text || idea.data?.original_text || ""))
+    .filter(Boolean);
+  if (!items.length) return "我有找到想法紀錄，但這次沒有適合直接顯示的內容。";
+  const lines = [];
+  for (const text of items) {
+    const next = `${lines.length + 1}. ${text}`;
+    const draft = `我整理好了，目前共有 ${items.length} 則想法：\n\n${[...lines, next].join("\n")}`;
+    if (draft.length > 4_600) break;
+    lines.push(next);
+  }
+  const suffix = items.length > lines.length ? `\n\n我先列出前 ${lines.length} 則，剩下的可以再分批給你。` : "";
+  const message = `我整理好了，${label ? `${label}共有` : "目前共有"} ${items.length} 則想法：\n\n${lines.join("\n")}${suffix}`;
+  validateFinalUserMessage(message, task);
+  return message;
 }
 
 export function validateFinalUserMessage(message, task = {}) {
@@ -318,6 +459,19 @@ export function buildFailedUserMessage(task = {}, error = null) {
   return message;
 }
 
+export async function applyFailedFinalPush(task, error, push = pushFinalResult) {
+  task.final_user_message = isIdeaListRequest(task)
+    ? await buildIdeaListUserMessage(task).catch(() => buildFailedUserMessage(task, error))
+    : buildFailedUserMessage(task, error);
+  task.result_status = "failed";
+  const result = await push(task, { final_user_message: task.final_user_message })
+    .catch((pushError) => ({ pushed: false, status: null, reason: String(pushError?.message || pushError).slice(0, 120) }));
+  task.final_push_status = result.pushed ? "sent" : "failed";
+  task.final_push_http_status = result.status;
+  if (!result.pushed) task.final_push_error = result.reason || "push_failed";
+  return task;
+}
+
 async function executeWithCodex(task) {
   const prompt = [
     "你是菲比 LINE 智能助理 V3 的 Codex 執行器。你收到的是菲比從 LINE 傳來的原始訊息。",
@@ -329,6 +483,7 @@ async function executeWithCodex(task) {
     `想法修改/刪除工具：${IDEA_TOOLS}`,
     "請自行理解需求、選擇現有工具並真正完成工作。不要做預先 regex 分類，不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
     "若原句是保存想法/備忘，直接使用既有本機工具新增一份 JSON，保留 original_text，完成後停止。",
+    "若原句是列出、查看、顯示既有想法內容，請優先使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search；若菲比指定今天/本月/今年，請加 --period day/month/year。final_user_message 只列出想法內容，不顯示檔名、路徑、工具名稱或工程欄位。",
     "若原句是修改既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js update --query <定位文字> --text <修改後文字>；若只有最後一筆語意，才可加 --latest。",
     "若原句是刪除既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js delete --query <定位文字>；刪除必須移到既有 Dropbox 想法刪除資料夾，不可直接硬刪。",
     "local-query-api 只可用於 count/list 查詢；不要把它當成修改或刪除工具。",
@@ -406,6 +561,45 @@ async function pushProgressResult(task, result) {
   return { pushed: response.ok && body.ok === true, status: response.status, reason: body.error };
 }
 
+async function pushProgressText(task, text) {
+  validateFinalUserMessage(text, task);
+  const response = await fetch(PROGRESS_PUSH_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task_id: task.task_id, text }),
+  });
+  const body = await response.json().catch(() => ({}));
+  return { pushed: response.ok && body.ok === true, status: response.status, reason: body.error };
+}
+
+export function buildRecoveryUserMessage(task = {}) {
+  const text = String(task.original_text || "");
+  let message;
+  if (task.execution_mode === "long") {
+    message = `我恢復了，現在開始處理剛剛排隊的任務。\n\n任務編號：${task.display_task_id || "未提供"}`;
+  } else if (/[?？]|多少|幾|列出|查看|顯示|看/.test(text)) {
+    message = "我恢復了，現在開始幫你整理剛剛排隊的查詢。";
+  } else {
+    message = "我恢復了，現在開始處理剛剛排隊的訊息。";
+  }
+  validateFinalUserMessage(message, task);
+  return message;
+}
+
+async function applyQueuedRecoveryNotice(task) {
+  if (!task.queued_while_offline) return null;
+  const message = buildRecoveryUserMessage(task);
+  task.progress_stage = "started_after_reconnect";
+  task.progress_user_message = message;
+  task.recovery_started_at = now();
+  const result = await pushProgressText(task, message)
+    .catch((error) => ({ pushed: false, status: null, reason: String(error?.message || error).slice(0, 120) }));
+  task.recovery_progress_push_status = result.pushed ? "sent" : "failed";
+  task.recovery_progress_push_http_status = result.status;
+  if (!result.pushed) task.recovery_progress_push_error = result.reason || "recovery_progress_push_failed";
+  return result;
+}
+
 async function executeAndPush(task) {
   return executeWithCodex(task);
 }
@@ -414,16 +608,19 @@ export async function scanKvOnce(handler = executeAndPush) {
   if (localScanLock) return;
   localScanLock = true;
   try {
-    const pendingKeys = await kvList("pending/");
+    await setExecutorRuntimeStatus(executorRuntimeStatus === "busy" ? "busy" : "online", executorCurrentTaskId, {
+      last_scan_started_at: now(),
+    });
+    const pendingKeys = await kvAdapter.list("pending/");
     for (const pendingKey of pendingKeys) {
       const file = pendingKey.slice("pending/".length);
       const completedKey = `completed/${file}`;
       const failedKey = `failed/${file}`;
-      if (await kvGetOrNull(completedKey) || await kvGetOrNull(failedKey)) {
-        await kvDelete(pendingKey).catch(() => {});
+      if (await kvAdapter.getOrNull(completedKey) || await kvAdapter.getOrNull(failedKey)) {
+        await kvAdapter.delete(pendingKey).catch(() => {});
         continue;
       }
-      const task = JSON.parse(await kvGet(pendingKey));
+      const task = JSON.parse(await kvAdapter.get(pendingKey));
       const processingKey = `processing/${file}`;
       const claimToken = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       task.status = "processing";
@@ -431,13 +628,20 @@ export async function scanKvOnce(handler = executeAndPush) {
       task.attempts = Number(task.attempts || 0) + 1;
       task.claimed_by = process.env.CODEX_WORKER_ID || "codex-inbox-monitor";
       task.claim_token = claimToken;
-      await kvPut(processingKey, JSON.stringify(task));
-      const confirmedClaim = await kvGetOrNull(processingKey);
+      task.executor_last_heartbeat_at = executorLastHeartbeatAt || task.executor_last_heartbeat_at || null;
+      await kvAdapter.put(processingKey, JSON.stringify(task));
+      const confirmedClaim = await kvAdapter.getOrNull(processingKey);
       if (!confirmedClaim || JSON.parse(confirmedClaim).claim_token !== claimToken) continue;
-      await kvDelete(pendingKey);
+      await kvAdapter.delete(pendingKey);
       try {
+        task.execution_started_at = now();
+        await setExecutorRuntimeStatus("busy", task.task_id, {
+          execution_started_at: task.execution_started_at,
+        });
+        await applyQueuedRecoveryNotice(task);
+        await kvAdapter.put(processingKey, JSON.stringify(task));
         const result = await handler(task);
-        const owner = await kvGetOrNull(processingKey);
+        const owner = await kvAdapter.getOrNull(processingKey);
         if (!owner || JSON.parse(owner).claim_token !== claimToken) continue;
         task.status = "completed";
         task.completed_at = now();
@@ -447,7 +651,7 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.progress_user_message = String(result?.progress_user_message || "").slice(0, MAX_LINE_MESSAGE_LENGTH) || null;
         task.result_summary = task.technical_summary.slice(0, 500);
         task.result_status = result?.result_status || "completed";
-        if (!(await kvGetOrNull(failedKey))) await kvPut(completedKey, JSON.stringify(task));
+        if (!(await kvAdapter.getOrNull(failedKey))) await kvAdapter.put(completedKey, JSON.stringify(task));
         const progress = await pushProgressResult(task, result);
         if (progress) {
           task.progress_push_status = progress.pushed ? "sent" : "failed";
@@ -457,36 +661,36 @@ export async function scanKvOnce(handler = executeAndPush) {
         const push = await pushFinalResult(task, result);
         task.final_push_status = push.pushed ? "sent" : "failed";
         task.final_push_http_status = push.status;
+        task.final_push_at = now();
         if (!push.pushed) task.final_push_error = push.reason || "push_failed";
-        await kvPut(completedKey, JSON.stringify(task));
-        await kvDelete(processingKey);
+        await kvAdapter.put(completedKey, JSON.stringify(task));
+        await kvAdapter.delete(processingKey);
+        await setExecutorRuntimeStatus("online", null, { last_completed_task_id: task.task_id });
       } catch (error) {
-        const owner = await kvGetOrNull(processingKey);
+        const owner = await kvAdapter.getOrNull(processingKey);
         if (!owner || JSON.parse(owner).claim_token !== claimToken) continue;
         task.status = "failed";
         task.failed_at = now();
         task.error_summary = String(error?.message || error).slice(0, 500);
         task.retryable = true;
-        if (task.execution_mode === "long") {
-          task.final_user_message = buildFailedUserMessage(task, error);
-          task.result_status = "failed";
-          const push = await pushFinalResult(task, { final_user_message: task.final_user_message })
-            .catch((pushError) => ({ pushed: false, status: null, reason: String(pushError?.message || pushError).slice(0, 120) }));
-          task.final_push_status = push.pushed ? "sent" : "failed";
-          task.final_push_http_status = push.status;
-          if (!push.pushed) task.final_push_error = push.reason || "push_failed";
-        }
-        if (!(await kvGetOrNull(completedKey))) await kvPut(failedKey, JSON.stringify(task));
-        await kvDelete(processingKey);
+        await applyFailedFinalPush(task, error);
+        task.final_push_at = now();
+        if (!(await kvAdapter.getOrNull(completedKey))) await kvAdapter.put(failedKey, JSON.stringify(task));
+        await kvAdapter.delete(processingKey);
+        await setExecutorRuntimeStatus("online", null, { last_failed_task_id: task.task_id });
       }
     }
   } finally {
+    if (shouldWriteExecutorStatus() && executorRuntimeStatus !== "busy") {
+      await setExecutorRuntimeStatus("online", null, { last_scan_finished_at: now() });
+    }
     localScanLock = false;
   }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const scan = process.env.CODEX_INBOX_MODE === "kv" ? scanKvOnce : scanOnce;
+  startExecutorHeartbeat();
   startWakeServer(scan);
   await triggerScan(scan, "startup");
   setInterval(() => triggerScan(scan, "fallback_poll").catch(() => {}), POLL_INTERVAL_MS);
