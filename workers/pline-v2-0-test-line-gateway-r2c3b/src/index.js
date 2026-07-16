@@ -67,6 +67,10 @@ function lineMessageId(event = {}) {
   return typeof event.message?.id === "string" ? event.message.id : "";
 }
 
+function isWebhookRedelivery(event = {}) {
+  return event.deliveryContext?.isRedelivery === true;
+}
+
 function allowlistValues(value = "") {
   return String(value).split(",").map((item) => item.trim()).filter(Boolean);
 }
@@ -244,9 +248,7 @@ async function enqueuePendingTask(env = {}, pendingKey) {
   queuedKeys.push(pendingKey);
   if (queuedKeys.length > PENDING_QUEUE_LIMIT) queuedKeys = queuedKeys.slice(-PENDING_QUEUE_LIMIT);
   const payload = { keys: queuedKeys, updated_at: taipeiNow(), environment: ENVIRONMENT };
-  await env.CODEX_INBOX.put(PENDING_QUEUE_KEY, JSON.stringify(payload)).catch((error) => {
-    console.error("pending_queue_write_failed", { summary: error instanceof Error ? error.message : String(error) });
-  });
+  await env.CODEX_INBOX.put(PENDING_QUEUE_KEY, JSON.stringify(payload));
   return payload;
 }
 
@@ -268,7 +270,19 @@ export async function writeInboxTask(event, env, request = null) {
   const idempotencyIndexKey = `idempotency/${idempotency.idempotency_hash}`;
   if (!env.CODEX_INBOX) throw new Error("CODEX_INBOX binding is missing");
   const existingIdempotency = await env.CODEX_INBOX.get(idempotencyIndexKey, "json").catch(() => null);
-  if (existingIdempotency) return { duplicate: true, duplicate_task_id: existingIdempotency.task_id || id };
+  if (existingIdempotency) {
+    const duplicateTaskId = existingIdempotency.task_id || id;
+    const duplicatePendingKey = `pending/${duplicateTaskId}.json`;
+    const existingPending = await env.CODEX_INBOX.get(duplicatePendingKey, "json").catch(() => null);
+    if (existingPending) await enqueuePendingTask(env, duplicatePendingKey);
+    return {
+      duplicate: true,
+      duplicate_task_id: duplicateTaskId,
+      duplicate_status: existingIdempotency.status || existingPending?.status || "unknown",
+      webhook_redelivery: isWebhookRedelivery(event),
+      ack_user_message: "我剛剛已經收到這則訊息了，會以同一筆任務接著處理，不會重複建立。",
+    };
+  }
   const operation = await operationFingerprintForTask(event);
   const operationKey = operation ? `operation-fingerprints/${operation.operation_fingerprint}` : null;
   const userId = sourceUserId(event);
@@ -425,7 +439,7 @@ function wakeMonitorSoon(task, env = {}, ctx, request = null) {
 }
 
 function taskCreationFailedReply() {
-  return "我目前暫時無法建立任務，這次還沒有開始處理。請你稍後再傳一次。";
+  return "我目前暫時無法把這則訊息排進處理佇列，這次還沒有開始處理。請你稍後再傳一次。";
 }
 
 async function pushLineText(taskId, text, env, pushType = "final") {
@@ -489,6 +503,8 @@ export default {
         }
         const result = await writeInboxTask(event, env, request);
         if (result.duplicate_operation && result.ack_user_message) {
+          await replyToLine(event, env, result.ack_user_message);
+        } else if (result.duplicate && result.ack_user_message && !result.webhook_redelivery) {
           await replyToLine(event, env, result.ack_user_message);
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
