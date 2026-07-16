@@ -88,6 +88,36 @@ async function replyToLine(event, env, task) {
   if (!response.ok) console.error("line_reply_failed", { status: response.status });
 }
 
+export async function wakeMonitor(task, env = {}) {
+  const url = env.CODEX_MONITOR_WAKE_URL || env.CODEX_WAKE_URL || "";
+  if (!url) return { ok: true, skipped: true, reason: "missing_wake_url" };
+  const headers = { "content-type": "application/json" };
+  const token = env.CODEX_MONITOR_WAKE_TOKEN || env.CODEX_WAKE_TOKEN || "";
+  if (token) headers.authorization = `Bearer ${token}`;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        event: "pending_task_created",
+        project: PROJECT,
+        display_task_id: task?.display_task_id || null,
+        at: taipeiNow(),
+      }),
+    });
+    return { ok: response.ok, status: response.status };
+  } catch (error) {
+    console.error("monitor_wake_failed", { summary: error instanceof Error ? error.message : String(error) });
+    return { ok: false, error: "wake_failed" };
+  }
+}
+
+function wakeMonitorSoon(task, env = {}, ctx) {
+  const wake = wakeMonitor(task, env);
+  if (ctx?.waitUntil) ctx.waitUntil(wake);
+  else void wake;
+}
+
 async function pushLineText(taskId, text, env) {
   const task = taskId && env.CODEX_INBOX
     ? (await env.CODEX_INBOX.get(`completed/${taskId}.json`, "json"))
@@ -105,7 +135,7 @@ async function pushLineText(taskId, text, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method === "GET") return json({ ok: true, worker: WORKER_NAME, version: "V3.0" });
     if (request.method === "POST" && new URL(request.url).pathname === "/internal/final-push") {
       let body;
@@ -124,7 +154,10 @@ export default {
       if (event?.type !== "message" || event?.message?.type !== "text" || typeof event.replyToken !== "string") continue;
       try {
         const result = await writeInboxTask(event, env);
-        if (!result.duplicate) await replyToLine(event, env, result.task);
+        if (!result.duplicate) {
+          wakeMonitorSoon(result.task, env, ctx);
+          await replyToLine(event, env, result.task);
+        }
       } catch (error) {
         console.error("inbox_task_failed", { status: "error", summary: error instanceof Error ? error.message : String(error) });
       }

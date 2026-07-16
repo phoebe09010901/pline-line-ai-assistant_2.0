@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
@@ -14,10 +15,81 @@ const DROPBOX_DELETED_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專
 const IDEA_TOOLS = path.join(ROOT, "idea-tools.js");
 const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
 const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/progress-push";
+const WAKE_HOST = process.env.CODEX_WAKE_HOST || "127.0.0.1";
+const WAKE_PORT = Number(process.env.CODEX_WAKE_PORT || 8793);
+const WAKE_TOKEN = process.env.CODEX_WAKE_TOKEN || "";
+const POLL_INTERVAL_MS = 60_000;
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
+let rescanRequested = false;
+let triggerScanRunning = false;
+
+function isLocalAddress(address = "") {
+  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
+}
+
+function isAuthorizedWake(request) {
+  if (!WAKE_TOKEN) return true;
+  const bearer = request.headers.authorization?.replace(/^Bearer\s+/i, "");
+  return bearer === WAKE_TOKEN || request.headers["x-codex-wake-token"] === WAKE_TOKEN;
+}
+
+export async function triggerScan(scan, source = "manual") {
+  if (triggerScanRunning || localScanLock) {
+    rescanRequested = true;
+    return { ok: true, started: false, queued: true, source };
+  }
+  triggerScanRunning = true;
+  let runs = 0;
+  try {
+    do {
+      rescanRequested = false;
+      await scan();
+      runs += 1;
+    } while (rescanRequested);
+    return { ok: true, started: true, queued: false, runs, source };
+  } finally {
+    triggerScanRunning = false;
+  }
+}
+
+export function createWakeServer(scan) {
+  return createServer(async (request, response) => {
+    if (!isLocalAddress(request.socket.remoteAddress)) {
+      response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "local_only" }));
+      return;
+    }
+    if (request.method !== "POST" || request.url !== "/wake") {
+      response.writeHead(request.url === "/wake" ? 405 : 404, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: request.url === "/wake" ? "method_not_allowed" : "not_found" }));
+      return;
+    }
+    if (!isAuthorizedWake(request)) {
+      response.writeHead(401, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+      return;
+    }
+    request.resume();
+    void triggerScan(scan, "wake").catch((error) => console.error("wake_scan_failed", { summary: error instanceof Error ? error.message : String(error) }));
+    response.writeHead(202, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: true, accepted: true }));
+  });
+}
+
+export function startWakeServer(scan) {
+  if (process.env.CODEX_WAKE_DISABLED === "1") return null;
+  const server = createWakeServer(scan);
+  server.listen(WAKE_PORT, WAKE_HOST, () => {
+    console.log(`codex inbox wake listening on http://${WAKE_HOST}:${WAKE_PORT}/wake`);
+  });
+  server.on("error", (error) => {
+    console.error("wake_server_failed", { summary: error instanceof Error ? error.message : String(error) });
+  });
+  return server;
+}
 
 function runCodex(args, options) {
   return new Promise((resolve, reject) => {
@@ -415,6 +487,7 @@ export async function scanKvOnce(handler = executeAndPush) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const scan = process.env.CODEX_INBOX_MODE === "kv" ? scanKvOnce : scanOnce;
-  await scan();
-  setInterval(() => scan().catch(() => {}), 60_000);
+  startWakeServer(scan);
+  await triggerScan(scan, "startup");
+  setInterval(() => triggerScan(scan, "fallback_poll").catch(() => {}), POLL_INTERVAL_MS);
 }
