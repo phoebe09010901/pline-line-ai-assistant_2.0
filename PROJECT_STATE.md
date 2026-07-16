@@ -27,6 +27,44 @@ V3.0 Codex LINE Inbox 已完成真實單筆 / 三筆閉環驗收。
 - duplicate task / execution / ACK / final push：0 / 0 / 0 / 0
 - 最終 KV：pending / processing 皆空；三筆只在 completed，failed 無新增
 
+## Codex 長任務通知模式 live 驗收
+
+Codex 長任務通知模式已完成 live LINE 驗收。
+
+- release commit：`54d49e77d78ffe77d5b6eb8facd13b166c1a779b`
+- Worker version id：`2b185523-f024-4ea6-93c9-54abb8d79ec0`
+- TEST thread id：`019f6940-ff63-7392-8dab-d285f4f44928`
+- TEST turn id：`019f699c-50c5-7912-b823-2a292be0accd`
+- quick task id：`01KXMST2V7ZZ73YC3XXEV7M5RJ`
+- long task id：`01KXMSZVXM2EMD8XJX12584Y1S`
+- display_task_id：`P-N4SSOP-0SYS`
+- duplicate ACK / final push / task / execution：0 / 0 / 0 / 0
+
+已可標 PASS：
+
+- quick task 不進長任務通知流程，live PASS
+- long task immediate ACK 顯示 display_task_id，live PASS
+- progress / final 對外無內部工程欄位，live PASS
+- duplicate ACK / final push / task / execution = 0
+
+產品規格：
+
+- 只有需要修改檔案、整理專案、執行程式、部署、Computer Use、多步驟工作或長時間分析的任務，才進入 Codex 長任務模式。
+- 簡單想法新增、搜尋、修改、刪除與一般快速任務，仍可直接執行並回覆，不進入長任務通知流程。
+- 長任務 LINE immediate ACK：
+
+```text
+已收到任務，正在處理中 🛠️
+
+任務編號：<display_task_id>
+
+完成後會再通知你。
+```
+
+- 狀態通知不得由 monitor 根據任務類型套固定內容；Codex / 執行端產生自然的 `progress_user_message`，monitor 只負責原樣推送。
+- 相關欄位：`display_task_id`、`execution_mode`、`progress_stage`、`progress_user_message`、`technical_summary`、`final_user_message`。
+- LINE 不得顯示內部 task_id、PID、stdout、stderr、本機路徑或工程欄位。
+
 ## V3.0 FIX 完成內容
 
 - FIX thread id：`019f6941-2862-7602-8b91-c38870711703`
