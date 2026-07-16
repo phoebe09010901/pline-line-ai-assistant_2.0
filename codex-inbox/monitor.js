@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { listIdeasForPeriod } from "./idea-tools.js";
+import { ACCOUNTING_TARGET_FILE, syncAccountingCsv } from "./accounting-tools.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const INBOX_ROOT = ROOT;
@@ -14,6 +15,7 @@ const PROJECT_ROOT = path.resolve(ROOT, "..");
 const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
 const DROPBOX_DELETED_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除";
 const IDEA_TOOLS = path.join(ROOT, "idea-tools.js");
+const ACCOUNTING_TOOLS = path.join(ROOT, "accounting-tools.js");
 const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
 const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/progress-push";
 const WAKE_HOST = process.env.CODEX_WAKE_HOST || "127.0.0.1";
@@ -363,7 +365,54 @@ function allowsTechnicalDetails(task) {
 
 function isIdeaListRequest(task = {}) {
   const text = String(task?.original_text || "");
-  return /(?:列出|列表|查看|看|顯示).*(?:想法|則|全部|所有|來給我看)|(?:想法|則).*(?:列出|列表|查看|看|顯示)|可以列出來給我看嗎/.test(text);
+  return /(?:列出|列表|查看|看|顯示).*(?:想法|則|全部|所有|通通|全都|來給我看)|(?:想法|則).*(?:列出|列表|查看|看|顯示)|(?:通通|全部|所有|全都|都).*(?:列出|列出來|列表|顯示)|可以列出來給我看嗎/.test(text);
+}
+
+function isAccountingCsvRequest(task = {}) {
+  return /菲比帳務明細(?:\.csv)?|帳務明細\.csv|帳務明細/.test(String(task?.original_text || ""));
+}
+
+function hasExplicitDataSource(text = "") {
+  return /(?:google\s*日曆|Google\s*日曆|日曆|calendar|Calendar|想法|備忘|紀錄|帳務|帳本|csv|CSV|菲比帳務明細)/.test(text);
+}
+
+function isAmbiguousDateDataRequest(task = {}) {
+  const text = String(task?.original_text || "");
+  const hasDate = /(?:\d{1,2}\/\d{1,2}|\d{1,2}月\d{1,2}日|今天|明天|後天|昨天)/.test(text);
+  const asksForData = /(?:幾筆|幾個|多少|資料|明細|列出|查看|查一下|這天)/.test(text);
+  return hasDate && asksForData && !hasExplicitDataSource(text);
+}
+
+export function buildAmbiguousDateDataSourceMessage(task = {}) {
+  const text = String(task?.original_text || "");
+  const date = text.match(/(?:\d{1,2}\/\d{1,2}|\d{1,2}月\d{1,2}日|今天|明天|後天|昨天)/)?.[0] || "這天";
+  const message = `我可以幫你查 ${date}，但我需要先確認資料來源。你要我查想法紀錄、Google 日曆，還是帳務明細？`;
+  validateFinalUserMessage(message, task);
+  return message;
+}
+
+export function maybeBuildClarificationResult(task = {}) {
+  if (!isAmbiguousDateDataRequest(task)) return null;
+  return {
+    technical_summary: "Ambiguous date data query without an explicit source. No data source was queried; asked the user to choose ideas, Google Calendar, or accounting records.",
+    final_user_message: buildAmbiguousDateDataSourceMessage(task),
+    progress_stage: null,
+    progress_user_message: null,
+    result_status: "needs_clarification",
+  };
+}
+
+export async function verifyAccountingCsvResult(task = {}, result = {}) {
+  if (!isAccountingCsvRequest(task)) return result;
+  const requiredText = /雞排/.test(String(result.final_user_message || "")) ? "雞排" : "";
+  const synced = await syncAccountingCsv({ requiredText });
+  return {
+    ...result,
+    technical_summary: [
+      String(result.technical_summary || ""),
+      `Accounting CSV target verified after sync. target=${synced.target}; bytes=${synced.bytes}; verified=${synced.verified}`,
+    ].filter(Boolean).join("\n").slice(0, 4_000),
+  };
 }
 
 function ideaListPeriod(task = {}) {
@@ -499,9 +548,15 @@ async function executeWithCodex(task) {
     `既有 Dropbox 想法資料夾：${DROPBOX_DIR}`,
     `既有 Dropbox 想法刪除資料夾：${DROPBOX_DELETED_DIR}`,
     `想法修改/刪除工具：${IDEA_TOOLS}`,
+    `帳務 CSV 同步工具：${ACCOUNTING_TOOLS}`,
+    `帳務 CSV 正式目標檔：${ACCOUNTING_TARGET_FILE}`,
     "請自行理解需求、選擇現有工具並真正完成工作。不要做預先 regex 分類，不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
     "若原句是保存想法/備忘，只能使用既有本機工具新增想法，不得自行手寫 JSON。請執行：node codex-inbox/idea-tools.js save --text <要保存的想法內容> --task-id <task_id> --source-event-id <line_event_id> --source-message-id <line_message_id> --source-user-id <source_user_id> --source-user-fingerprint <source_user_fingerprint> --idempotency-key <idempotency_key> --operation-fingerprint <operation_fingerprint>。如果工具回傳 duplicate=true，final_user_message 要說我剛剛已經記過同一個內容，這次沒有重複新增。",
-    "若原句是列出、查看、顯示既有想法內容，請優先使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search；若菲比指定今天/本月/今年，請加 --period day/month/year。final_user_message 只列出想法內容，不顯示檔名、路徑、工具名稱或工程欄位。",
+    "若原句是列出、查看、顯示既有想法內容，或用「通通/全部/所有/都列出來」這類延續語句要求列出，請優先使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search；若菲比指定今天/本月/今年，請加 --period day/month/year。final_user_message 只列出想法內容，不顯示檔名、路徑、工具名稱或工程欄位。",
+    "若原句是日期資料查詢但沒有明確指定想法、Google 日曆或帳務明細，不要自行選資料來源，也不要把想法紀錄回覆得像日曆答案；請直接在 final_user_message 詢問菲比要查哪個資料來源。",
+    "若原句明確包含 Google 日曆或日曆，必須只查 Google Calendar 結果，不得混用想法紀錄；final_user_message 要自然標明是 Google 日曆。",
+    "若原句明確包含想法、備忘或想法紀錄，才使用想法工具查詢；final_user_message 要自然標明是想法紀錄。",
+    "若原句是帳務明細 CSV 未更新、同步或檢查「菲比帳務明細.csv」，不得只複製到專案資料夾或驗證 codex-inbox 內同名檔。必須使用帳務 CSV 同步工具：node codex-inbox/accounting-tools.js sync。只有工具成功寫入並讀回帳務 CSV 正式目標檔後，final_user_message 才能說已同步；若工具失敗，必須說尚未完成。",
     "若原句是修改既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js update --query <定位文字> --text <修改後文字>；若只有最後一筆語意，才可加 --latest。",
     "若原句是刪除既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js delete --query <定位文字>；刪除必須移到既有 Dropbox 想法刪除資料夾，不可直接硬刪。",
     "local-query-api 只可用於 count/list 查詢；不要把它當成修改或刪除工具。",
@@ -559,7 +614,7 @@ async function executeWithCodex(task) {
   if (!lastMessage.trim() || /Reading additional input from stdin/i.test(lastMessage)) {
     throw new Error(`Codex returned no execution summary: exit_code=${exitCode} stdout=${stdout.trim().slice(-200)} stderr=${stderr.trim().slice(-300)}`);
   }
-  return parseCodexResult(lastMessage, task);
+  return verifyAccountingCsvResult(task, await parseCodexResult(lastMessage, task));
 }
 
 async function pushFinalResult(task, result) {
@@ -675,7 +730,7 @@ async function updateOperationFingerprintRecord(task = {}, status = "completed")
 }
 
 async function executeAndPush(task) {
-  return executeWithCodex(task);
+  return maybeBuildClarificationResult(task) || executeWithCodex(task);
 }
 
 export async function scanKvOnce(handler = executeAndPush) {
