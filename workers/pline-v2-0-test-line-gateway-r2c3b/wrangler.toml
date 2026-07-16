@@ -2,3 +2,7 @@ name = "pline-v2-0-test-line-gateway-r2c3b"
 main = "src/index.js"
 compatibility_date = "2026-07-15"
 workers_dev = true
+
+[[kv_namespaces]]
+binding = "CODEX_INBOX"
+id = "ba842d5662f94e60bfeb4a85e9f0e36c"
