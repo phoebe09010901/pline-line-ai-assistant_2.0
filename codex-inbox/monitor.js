@@ -180,9 +180,12 @@ export function validateFinalUserMessage(message, task = {}) {
   if (!message) throw new Error("Codex did not provide a valid LINE final message");
   if (message.length > MAX_LINE_MESSAGE_LENGTH) throw new Error("Codex LINE final message is too long");
   const blockedPatterns = [
-    /\/Users\/[^\s]+/,
+    /\/(?:Users|Volumes|tmp|var|opt|private|Applications)\/[^\s]+/,
+    /\bfile:\/\/[^\s]+/i,
+    /(?:^|\s)(?:\.{1,2}\/|[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]{1,8}\b/,
     /\[[^\]]+\]\([^)]+\)/,
     /\b(?:task_id|original_text|stdout|stderr|exit code|PID)\b/i,
+    /\b(?:error_summary|variant|TTL)\b/i,
     /\b(?:authorization|bearer|access_token|refresh_token|client_secret|LINE_CHANNEL|secret|credential)\b/i,
     /\bsk-[A-Za-z0-9_-]+/,
     /\b[\w.-]+\.json\b/i,
@@ -198,12 +201,47 @@ export function validateFinalUserMessage(message, task = {}) {
     /系統已將任務交給阿光/,
     /阿光已收到系統轉交的任務/,
   ];
+  const safetyNarrationPatterns = [
+    /本機路徑/,
+    /絕對路徑/,
+    /相對路徑/,
+    /檔案路徑/,
+    /JSON\s*檔名/i,
+    /Markdown\s*連結/i,
+    /工程欄位/,
+    /技術欄位/,
+    /內部欄位/,
+    /內部資訊/,
+    /內部 execution 欄位/i,
+  ];
   if (blockedPatterns.some((pattern) => pattern.test(message))) {
     throw new Error("Codex did not provide a valid LINE final message");
   }
   if (!allowsTechnicalDetails(task) && internalRolePatterns.some((pattern) => pattern.test(message))) {
     throw new Error("Codex did not provide a valid LINE final message");
   }
+  if (!allowsTechnicalDetails(task) && safetyNarrationPatterns.some((pattern) => pattern.test(message))) {
+    throw new Error("Codex did not provide a valid LINE final message");
+  }
+}
+
+export function buildFailedUserMessage(task = {}, error = null) {
+  const errorText = String(error?.message || error || "");
+  const originalText = String(task?.original_text || "");
+  const timedOut = /timed?\s*out|timeout|逾時/i.test(errorText);
+  const invalidResult = /did not provide|no execution summary|parseable|valid JSON|valid LINE final message/i.test(errorText);
+  let message;
+  if (timedOut) {
+    message = "我處理這個任務時卡住了，這次還沒完成。任務紀錄我會保留，等一下可以再試一次。";
+  } else if (invalidResult) {
+    message = "我這次沒有把結果整理成功，所以先不把它當成完成。任務紀錄我會保留，等一下可以再試一次。";
+  } else if (originalText.length > 40) {
+    message = "我處理這個任務時遇到狀況，這次沒有完成。任務紀錄我會保留，稍後可以再試一次。";
+  } else {
+    message = "我目前處理時遇到問題，這次還沒完成。任務紀錄我會保留，等一下可以再試一次。";
+  }
+  validateFinalUserMessage(message, task);
+  return message;
 }
 
 async function executeWithCodex(task) {
@@ -224,6 +262,7 @@ async function executeWithCodex(task) {
     "對菲比顯示的 progress_user_message 與 final_user_message，一律使用阿光同一人格，並以第一人稱「我」回報。",
     "一般 LINE 對話不得把 LINE 端、Gateway、monitor、Worker 或 Codex 描述成不同角色；除非菲比明確詢問技術細節，否則不要在對外訊息出現 Codex、monitor、Worker、Gateway 等內部名稱。",
     "對外訊息不得出現「已交給 Codex」、「Codex 正在處理」、「系統已將任務交給阿光」、「等待 Codex 回覆」或「阿光已收到系統轉交的任務」。",
+    "一般 LINE 對話只說實際完成結果，不要描述你避開了哪些內部資訊，也不要出現「本機路徑」、「JSON 檔名」、「Markdown 連結」、「工程欄位」、「技術欄位」、「內部欄位」這類安全規則文字。",
     "對外訊息可自然使用「我收到任務了」、「我正在處理」、「我正在執行」、「我正在驗證結果」、「我已完成」或「我目前遇到問題」等第一人稱語氣，但不要固定成單一句型。",
     "LINE 最終回覆規則：",
     "1. 使用自然、簡單的繁體中文。",
@@ -349,6 +388,15 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.failed_at = now();
         task.error_summary = String(error?.message || error).slice(0, 500);
         task.retryable = true;
+        if (task.execution_mode === "long") {
+          task.final_user_message = buildFailedUserMessage(task, error);
+          task.result_status = "failed";
+          const push = await pushFinalResult(task, { final_user_message: task.final_user_message })
+            .catch((pushError) => ({ pushed: false, status: null, reason: String(pushError?.message || pushError).slice(0, 120) }));
+          task.final_push_status = push.pushed ? "sent" : "failed";
+          task.final_push_http_status = push.status;
+          if (!push.pushed) task.final_push_error = push.reason || "push_failed";
+        }
         if (!(await kvGetOrNull(completedKey))) await kvPut(failedKey, JSON.stringify(task));
         await kvDelete(processingKey);
       }
