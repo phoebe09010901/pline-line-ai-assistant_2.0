@@ -60,6 +60,41 @@
 - FIX validation PASS：`node --check`、`git diff --check`、`/tmp mock search/update/delete`、真實 Dropbox read-only search、阿光安全防漏檢查。
 - monitor 已由 FIX 重啟；PID 只可寫入技術文件，不得出現在 LINE 對外訊息。
 
+### 阿光事件驅動即時喚醒 baseline
+
+事件驅動 wake 已完成程式實作、測試與 release 收尾，納入 V3.1 測試專案行為基準。
+
+- RELEASE commit：`9508fca2124748a98dd8d9925605e0f46d5a53ec`
+- committed files：`codex-inbox/monitor.js`、`workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+- 測試 Worker：`pline-v2-0-test-line-gateway-r2c3b`
+- Worker version id：`125139b5-95cf-4e75-ae98-43739e99e322`
+- `_02` 測試 monitor LaunchAgent running，PID `85389`
+- 本機 wake endpoint：`POST http://127.0.0.1:8793/wake` 回 `202 Accepted`
+- local HEAD 與 `origin/v3/codex-line-inbox` 對齊 commit：`9508fca2124748a98dd8d9925605e0f46d5a53ec`
+
+驗證 PASS：
+
+- `node --check codex-inbox/monitor.js`
+- `node --check workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+- `node --check codex-inbox/idea-tools.js`
+- `git diff --check` for two changed program files
+- wake / `ctx.waitUntil` / fallback poll source confirmation
+- TEST local/mock duplicate task / execution / ACK / final push = 0 / 0 / 0 / 0
+
+基準規格：
+
+- Gateway 寫入 pending task 後以 `ctx.waitUntil` 非阻塞 wake monitor。
+- wake 不取代 inbox task；monitor 不信任 wake body，仍重新讀 pending 並用既有原子 claim。
+- 重複 wake 不造成 duplicate execution。
+- monitor 執行中新增任務保留在 queue，後續 queued wake / scan 處理。
+- wake failed 時 webhook 仍快速 ACK，task 保留 pending，fallback poll 補救。
+- fallback poll 保留低頻 60 秒，只作備援，不是主要啟動方式。
+- 不破壞 stdin / EOF、task 狀態、duplicate 防護、LINE final push、Dropbox idea tools。
+
+阿光對外人格規格仍維持：LINE 對菲比用第一人稱「我」，不得顯示 Codex / monitor / Worker / Gateway 等內部角色名，除非菲比問技術細節。
+
+本輪沒有切換正式 LINE、正式 Cloudflare、n8n 或 FORMAL；不得將正式資源標示為已切換。
+
 ---
 
 ## V3.0 history baseline note

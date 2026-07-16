@@ -4,6 +4,58 @@
 
 ## 2026-07-16
 
+### DOC｜阿光事件驅動即時喚醒規格與 RELEASE 驗收
+
+本輪 `PLine｜DOC｜文件與規格整理` 記錄阿光事件驅動即時喚醒規格與 RELEASE 驗收結果。
+
+更新文件：
+
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+- `CODEX_NOTES.md`
+- `BASELINE.md`
+
+RELEASE 結果：
+
+- 事件驅動 wake 已完成程式實作、測試、release 收尾
+- RELEASE commit：`9508fca2124748a98dd8d9925605e0f46d5a53ec`
+- committed files：`codex-inbox/monitor.js`、`workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+- 測試 Worker：`pline-v2-0-test-line-gateway-r2c3b`
+- Worker version id：`125139b5-95cf-4e75-ae98-43739e99e322`
+- `_02` 測試 monitor LaunchAgent running，PID `85389`
+- 本機 wake endpoint：`POST http://127.0.0.1:8793/wake` 回 `202 Accepted`
+- local HEAD 與 `origin/v3/codex-line-inbox` 對齊 commit：`9508fca2124748a98dd8d9925605e0f46d5a53ec`
+
+驗證 PASS：
+
+- `node --check codex-inbox/monitor.js`
+- `node --check workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+- `node --check codex-inbox/idea-tools.js`
+- `git diff --check` for two changed program files
+- wake / `ctx.waitUntil` / fallback poll source confirmation
+- TEST local/mock duplicate task / execution / ACK / final push = 0 / 0 / 0 / 0
+
+規格重點：
+
+- Gateway 寫入 pending task 後以 `ctx.waitUntil` 非阻塞 wake monitor。
+- wake 不取代 inbox task；monitor 不信任 wake body，仍重新讀 pending 並用既有原子 claim。
+- 重複 wake 不造成 duplicate execution。
+- monitor 執行中新增任務保留在 queue，後續 queued wake / scan 處理。
+- wake failed 時 webhook 仍快速 ACK，task 保留 pending，fallback poll 補救。
+- fallback poll 保留低頻 60 秒，只作備援，不是主要啟動方式。
+- 不破壞 stdin / EOF、task 狀態、duplicate 防護、LINE final push、Dropbox idea tools。
+
+阿光對外人格規格仍維持：LINE 對菲比用第一人稱「我」，不得顯示 Codex / monitor / Worker / Gateway 等內部角色名，除非菲比問技術細節。
+
+邊界：
+
+- 本輪沒有切換正式 LINE、正式 Cloudflare、n8n 或 FORMAL
+- 不得將正式資源標示為已切換
+- 本輪 DOC 只改文件，未改程式、未部署、未 commit、未 push
+- 工作區仍可能有 unrelated dirty docs；不得誤報全 repo clean
+
+---
+
 ### DOC｜V3.1 阿光統一人格與自然任務回覆基準
 
 本輪 `PLine｜DOC｜文件與規格整理` 只更新 V3.1 基準四份文件。
@@ -68,6 +120,81 @@ FIX 已完成、待 RELEASE 收尾：
 - 正式搬遷必須等 RELEASE 完成 V3.1 baseline commit / push / tag 後，由控制台續派 RELEASE 先盤點正式資源再移動
 - 未把尚未做的正式上線、FORMAL、n8n 改動寫成 PASS
 - 本輪 DOC 未修改程式碼、未 commit、未 push、未打 tag、未部署
+
+---
+
+### 阿光失敗通知整理與本機驗證
+
+本輪依 LINE 原始需求「請幫我整理專案並驗證阿光失敗通知」整理專案入口文件，並驗證 long task 失敗時的對外通知。
+
+整理結果：
+
+- `README.md` 已補上長任務失敗通知規則。
+- `codex-inbox/monitor.js` 已有 `buildFailedUserMessage()`，long task 執行失敗時會產生自然的阿光失敗通知。
+- 失敗通知仍會經過 `validateFinalUserMessage()` 防護後才可作為對外訊息。
+- 本輪未發送 LINE、未呼叫 push API、未修改遠端 Worker / n8n / FORMAL / 付款 / Gmail / Calendar。
+
+驗證結果：
+
+```text
+AH_GUANG_FAILED_NOTIFICATION_LOCAL_VALIDATION=PASS
+MONITOR_SYNTAX=PASS
+FAILED_MESSAGE_NATURAL_FIRST_PERSON=PASS
+FAILED_MESSAGE_VALIDATE_GUARD=PASS
+BLOCK_LOCAL_PATH=PASS
+BLOCK_JSON_FILENAME=PASS
+BLOCK_INTERNAL_ROLE_CODEX=PASS
+BLOCK_MARKDOWN_LINK=PASS
+BLOCK_STDOUT=PASS
+BLOCK_PID=PASS
+LIVE_LINE_SEND=NOT_RUN
+REMOTE_PUSH_API=NOT_RUN
+FORMAL_ALLOWED=false
+```
+
+邊界：
+
+- 此次只做本機驗證，不宣稱新的 live LINE 失敗通知送達 PASS。
+- 未操作正式網站、FORMAL、付款、Gmail、Calendar 或對外發布。
+
+---
+
+### 阿光口吻第二次整理與本機驗證
+
+本輪依 LINE 原始需求「請幫我整理專案並驗證阿光口吻第二次」整理目前專案狀態與對外回覆規則。
+
+整理結果：
+
+- `README.md` 已有 V3 closed-loop 目前狀態、文件地圖、受保護 baseline、阿光口吻與 LINE 回覆規則。
+- 補上第二次本機驗證重點，明確標示 `progress_user_message` 與 `final_user_message` 都要維持阿光同一人格、以第一人稱「我」自然回報。
+- 本輪未修改 Worker / n8n / FORMAL / 付款 / Gmail / Calendar / 遠端部署。
+
+驗證結果：
+
+```text
+AH_GUANG_TONE_SECOND_LOCAL_VALIDATION=PASS
+NATURAL_PROGRESS_MESSAGE=PASS
+NATURAL_FINAL_MESSAGE=PASS
+BLOCK_LOCAL_PATH=PASS
+BLOCK_JSON_FILENAME=PASS
+BLOCK_INTERNAL_ROLE_CODEX=PASS
+BLOCK_INTERNAL_ROLE_MONITOR=PASS
+BLOCK_INTERNAL_ROLE_WORKER=PASS
+BLOCK_INTERNAL_ROLE_GATEWAY=PASS
+BLOCK_MARKDOWN_LINK=PASS
+BLOCK_TASK_ID=PASS
+BLOCK_STDOUT=PASS
+BLOCK_PID=PASS
+LIVE_LINE_SEND=NOT_RUN
+REMOTE_PUSH_API=NOT_RUN
+FORMAL_ALLOWED=false
+```
+
+邊界：
+
+- 此次是本機驗證，不宣稱新的 live LINE 測試 PASS。
+- 未操作正式網站、FORMAL、付款、Gmail、Calendar 或對外發布。
+- 未掃描整個專案；只讀入口文件、口吻相關檔案與必要 Git 狀態。
 
 ---
 
@@ -183,6 +310,102 @@ TEST 完成內容：
 - WORKER_STATUS：completed
 - ORCHESTRATOR_NOTIFY：no
 - ORCHESTRATOR_MESSAGE：Codex 自行撰寫 LINE 友善最終回覆已 PASS，不需續派。
+
+三筆真實 LINE 測試：
+
+1. `01KXMQ4DER98X2D302NNQNJZ6S`：原始訊息 `幫我記下，LINE 回覆格式已經變簡單了`。狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段：`已幫你記下這個備忘：LINE 回覆格式已經變簡單了。` 工具結果：Dropbox JSON +1，新增 `idea_2026-07-16_13-43-36.json`。
+2. `01KXMQCKYXPN2T3T2HK92K60DM`：原始訊息 `幫我找和會員登入有關的想法`。狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段為自然查詢結果，找到 2 筆和「會員」較相關的想法，並說明目前沒有直接找到「會員登入」或 login。工具結果：查詢既有想法資料，Dropbox JSON +0。
+3. `01KXMQH9J4GEG42CJB2SA0GFH8`：原始訊息 `幫我查看菲比股市練功房目前做到哪裡`。狀態 completed，attempts=1，final_push_status=sent，HTTP 200。LINE 第二段自然摘要股市練功房目前完成的報表、儀表板、三大法人、學習資料庫、VCP 模組、PDF 報表與下一步補強方向。工具結果：只讀查詢專案狀態與資料，Dropbox JSON +0。
+
+總驗收：
+
+- 三筆 ACK 各 1 次，皆為 `收到，已交給 Codex ✨`
+- LINE 第二段三筆皆只顯示 `final_user_message`
+- 三筆皆未顯示 `/Users/phoebe`、`.json`、Markdown link、`original_text`、`task_id`、stdout、stderr、exit code 或工程描述
+- duplicate task / execution / ACK / final push：0 / 0 / 0 / 0
+- 最終 KV：pending / processing 皆空；三筆只在 completed，failed 無新增
+
+邊界：
+
+- 本輪 DOC 未自行做新的 LINE 測試
+- 未修改 `codex-inbox/monitor.js`
+- 未修改 `n8n/*`
+- 未修改 LINE Gateway
+- 未修改 inbox 架構
+- 未碰舊專案、FORMAL、token、secret、credentials
+- 未 commit / push
+- 未把未做的 release / push / 遠端驗證寫成 PASS
+
+---
+
+### RELEASE closeout｜V3 receive-only 上線檢查同步
+
+本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 已同步到 V3 mainline receive-only checkpoint。
+
+- `PLine_RELEASE_CLOSEOUT_CHECK.md` 已改以 V3 receive-only checkpoint 作為本輪 release 判定。
+- `README.md` 已同步目前狀態：V3 receive-only PASS，完整 Codex 後段與 FORMAL 仍不允許。
+- V2.0 / 第一版 Dropbox baseline 保留為歷史與受保護綠燈，不作為本輪最新結論。
+- 本輪只做文件收尾與本機證據檢查，未修改 Worker、n8n、local-query-api、monitor。
+- 本輪未部署、未連接 FORMAL、未做新的 live send。
+
+判定：
+
+```text
+RELEASE_CLOSEOUT_STATUS=v3_receive_only_checkpoint_recorded
+LAUNCH_DECISION=V3_RECEIVE_ONLY_PASS_FULL_FLOW_NO_GO
+FORMAL_ALLOWED=false
+FINAL_LINE_RESULT_STATUS=not_passed
+NEXT_REQUIRED_PROOF=查明真實任務停點並完成單筆 LINE_TO_CODEX_TO_TOOL_TO_FINAL_LINE_RESULT
+```
+
+---
+
+### ARCHIVE 歷史建置紀錄同步
+
+同步 `PLine_ARCHIVE_HISTORY.md`，將歷史建置紀錄補到目前 V3 receive-only checkpoint。
+
+新增 archive 節點：
+
+- 第一版功能完整驗收
+- V3 mainline：Codex LINE inbox foundation
+- V3 receive-only live checkpoint
+
+入口同步：
+
+- `README.md` 改以 V3 receive-only checkpoint 作為目前狀態
+- `PLine_DOC_SPEC_INDEX.md` 明確標示 archive 追蹤 V2 / 第一版 / V3 checkpoint
+
+邊界：
+
+- 未修改 Worker
+- 未修改 n8n
+- 未修改 runtime task JSON
+- 未碰 FORMAL
+- 未新增 Thread 或子代理
+- 不誤標 LINE 第二段 Codex 最終結果為 PASS
+
+---
+
+### PLine N8N workflow recheck
+
+本輪 `PLine｜N8N｜n8n workflow 調整` 只做 V3 checkpoint 下的 n8n 判定與文件同步，未修改 workflow JSON。
+
+已確認：
+
+- `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json` 可解析，active=true，2 nodes / 1 connection
+- `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json` 可解析，active=true，4 nodes / 2 connections
+- Dropbox baseline 無 `credentials` key
+- 未檢出 authorization / bearer / access_token / refresh_token / client_secret / LINE_CHANNEL / sk- 類敏感字串
+- V3 receive-only checkpoint 的待修正主線是 Codex 後段任務停點，不是 n8n workflow
+
+狀態：
+
+```text
+N8N_WORKFLOW_JSON_CHANGED=false
+N8N_BASELINE_RECHECK=passed
+V3_MAINLINE_N8N_CHANGED=false
+FORMAL_ALLOWED=false
+```
 
 ---
 
