@@ -8,11 +8,73 @@
 
 先讓功能真正跑通，再增加功能。
 
+本輪 V3 文件結論以 `v3/codex-line-inbox` 為準，不以舊 V2 / 第一版 Dropbox baseline 作為本輪結論。
+
 目前階段採用：
 
 ```text
 綠燈不可破壞＋功能優先模式
 ```
+
+---
+
+# V3 mainline｜Codex LINE inbox foundation
+
+## V2 dirty 處理
+
+- archive branch：`archive/v2-uncommitted-before-v3`
+- archive commit：`7e0ca34`
+- runtime task JSON 已移出 repo，不進 Git
+- main 未改寫，V2 tags 保留
+
+## V3 分支
+
+- branch：`v3/codex-line-inbox`
+- start tag：`v2.0-idea-query-complete`
+- start commit：`78c44d63c6e74b7e9f1846dfc24d2c840aefc0bc`
+- 未混入 V2 dirty 變更
+- 未混入 runtime task JSON
+
+## V3 inbox / KV monitor
+
+- initial V3 implementation by FIX turn：`019f68a2-76e5-76e0-b9db-0e0456b1f984`
+- KV monitor fix commit：`2fba817d735ce7fb186dd74bbe4b0d3af3094e14`
+- failed archive / duplicate execution race fix commit：`9199b8c4fb04b068b7677bd39e59198bb6673940`
+- final fix changed file：`codex-inbox/monitor.js`
+- Worker version under test：`f06216fc-ad14-4a8f-a1f4-99d774abd90e`
+- final race fix did not modify Worker
+- n8n / LINE Webhook not modified
+
+## TEST final V3 pass
+
+- TEST thread id：`019f6660-c0f0-7d32-ad8e-460f76b9a81c`
+- TEST turn id：`019f68b8-6f8d-7353-89db-59dd19df33c0`
+- `REMOTE_SUCCESS_CASE=PASS`
+- `ORIGINAL_TEXT_PRESERVED=PASS`
+- `SINGLE_COMPLETED_STATE=PASS`
+- `FAILED_ARCHIVE_TEST=PASS`
+- `SINGLE_FAILED_STATE=PASS`
+- `DUPLICATE_TASK=0`
+- `DUPLICATE_REPLY=0`
+- `DUPLICATE_EXECUTION=0`
+- `LINE_SMOKE=PASS`
+- `LINE_REPLY_ONCE=PASS`
+- `REMOTE_PENDING_TO_COMPLETED_AFTER_LINE=PASS`
+- `UNEXPECTED_JSON_WRITES=0`
+- `UNEXPECTED_N8N_EXECUTIONS=0`
+- `SENSITIVE_DATA_FOUND=false`
+- `SAFE_TO_DISPATCH_FIX=no`
+- `NEXT_HANDOFF_TO_DOC_READY=PASS`
+
+## Current V3 behavior
+
+- LINE 作為 Codex 行動收件匣：LINE Gateway 收件後立即回覆 `收到，已交給 Codex ✨`
+- 原文完整保存到 remote KV pending task
+- monitor 可 claim KV pending，轉 processing / completed
+- failed archive 安全落到 failed，保留 `error_summary` / `retryable`，單一終態
+- duplicate event / reply / execution 均為 0
+- 尚未宣稱完整 Codex 自主工具選擇與完成後回覆 LINE 全面完成
+- 本輪是 V3 inbox / monitor foundation pass
 
 ---
 
@@ -214,6 +276,43 @@ FIX worker 已完成查詢功能並 PASS。
 
 ---
 
+# 第一版功能完整 PASS
+
+目前第一版功能已 PASS。
+
+已完成：
+
+- LINE 記錄想法與固定回覆
+- Dropbox JSON 寫入
+- 日 / 月 / 年數量與清單
+- 搜尋、查看、修改、刪除
+- 分類記錄直接 Worker → local-query-api → Dropbox
+- 分類搜尋
+- Codex queue pending task
+
+Computer Use 驗收結果：
+
+- TEST LINE：`菲比智能客服 測試`
+- Worker 最終版本：`3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
+- 查詢未送 n8n
+- n8n 僅保留既有成功記錄流程，未新增查詢路由
+- 固定 Dropbox TEST 路徑與 local-query-api 路徑維持文件既有設定
+- 分類測試 JSON：`category=網站`
+- 分類測試 JSON：`text` 已移除 `［網站］`
+- 分類測試 JSON：`original_text` 保留
+- 刪除測試資料已移至 `想法紀錄_TEST_已刪除`
+- Codex queue 測試前 2、測試後 3，新增 1 筆 pending
+- duplicate JSON = 0
+- duplicate reply = 0
+- 舊專案未修改
+- FORMAL 未操作
+
+補充：
+
+先前 TEST 中查詢分類曾失敗，後由 Worker 路由優先順序修正後 PASS。
+
+---
+
 # V2.0 Baseline
 
 2026-07-16 已保存目前成功版本為正式開發基準。
@@ -228,6 +327,9 @@ baseline 必須保持：
 - LINE → Worker PASS
 - Worker → n8n V2.0 PASS
 - n8n → TEST Dropbox JSON PASS
+- 搜尋 / 查看 / 修改 / 刪除 PASS
+- 分類記錄與分類搜尋 PASS
+- Codex queue pending task PASS
 - LINE Reply `記好了 ✨` PASS
 - duplicate JSON = 0
 - duplicate reply = 0
@@ -249,7 +351,9 @@ baseline 必須保持：
 - 查詢新增 JSON = 0
 - 記錄測試新增 JSON = 1
 - Worker URL / name unchanged
+- Worker final version = `3b55cc36-30cf-491f-8abd-2a9bec0d62a5`
 - n8n workflow unchanged
+- 查詢未送 n8n
 - baseline commit / tag 由 RELEASE thread 建立
 - 未 push
 
