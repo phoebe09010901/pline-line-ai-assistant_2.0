@@ -4,6 +4,73 @@
 
 ## 2026-07-16
 
+### DOC｜V3.1 阿光統一人格與自然任務回覆基準
+
+本輪 `PLine｜DOC｜文件與規格整理` 只更新 V3.1 基準四份文件。
+
+更新文件：
+
+- `PROJECT_STATE.md`
+- `CHANGELOG.md`
+- `CODEX_NOTES.md`
+- `BASELINE.md`
+
+基準資訊：
+
+- 基準名稱：V3.1 阿光統一人格與自然任務回覆基準
+- 日期：2026-07-16
+- branch：`v3/codex-line-inbox`
+- V3.1 前置程式基準 commit：`33a3ce62270dd462456d00a9272d381bac8264c2`
+- V3.0 歷史基準 commit：`7287cf5f254ca45782d7f5b262b1e698f16e7622`
+- V3.0 tag：`v3.0-codex-line-inbox-complete`
+- V3.0 checkpoint tag：`v3.0-inbox-receive-checkpoint`
+- RELEASE 預計建立 tag：`v3.1-aguang-unified-assistant-baseline`
+- tag 狀態：待 RELEASE 建立；DOC 未建立 tag
+
+TEST 驗收證據：
+
+- TEST final：`BASELINE_READY_FOR_DOC: yes`
+- 新增任務：`01KXMYS1E37N8BVRBH26KE44PF`
+- 修改任務：`01KXMZ12D77ZFTRBGWMXCNH6KH`
+- 刪除任務：`01KXMZGT6VFHYJ3Y8NW3VG9JK0`
+- 驗收唯一碼：`V31T1558R2`
+- 活躍檔案：`idea_2026-07-16_15-56-56.json`
+- 新增 / 修改使用資料夾：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- 刪除移入資料夾：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除`
+- KV inbox final：pending=0、processing=0、completed=22、failed=11
+- duplicate task=0、duplicate execution=0、duplicate ACK=0、duplicate final push=0
+- LINE final push：HTTP 200
+- 阿光對外人格安全：PASS
+
+阿光人格與 LINE 對外安全：
+
+- 對菲比顯示訊息統一第一人稱「我」
+- 不得出現 Codex / monitor / Worker / Gateway / 已交給 Codex 等內部角色或工程欄位
+- LINE 不得顯示內部 task_id、PID、stdout、stderr、本機路徑或工程欄位
+
+長任務通知模式：
+
+- 只有修改檔案、整理專案、執行程式、部署、Computer Use、多步驟或長時間分析才進長任務模式。
+- 簡單想法新增、搜尋、修改、刪除與快速任務可 quick 直接完成。
+- monitor 只原樣推送 `ack_user_message` / `progress_user_message` / `final_user_message`，不依任務類型套固定內容。
+
+FIX 已完成、待 RELEASE 收尾：
+
+- 新增 `codex-inbox/idea-tools.js`，支援 search / update / delete；delete 移入 `_02/想法紀錄_TEST_已刪除`，不硬刪。
+- 更新 `codex-inbox/monitor.js`，引導執行端用 `idea-tools.js` 處理想法搜尋 / 修改 / 刪除，`local-query-api` 僅負責 count / list。
+- FIX validation PASS：`node --check`、`git diff --check`、`/tmp mock search/update/delete`、真實 Dropbox read-only search、阿光安全防漏檢查。
+- monitor 已由 FIX 重啟；PID 只可寫入技術文件，不得出現在 LINE 對外訊息。
+
+邊界：
+
+- 目前完成的是 V3.1 測試專案基準可收尾
+- 正式「阿光智能助理」搬遷尚未完成
+- 正式搬遷必須等 RELEASE 完成 V3.1 baseline commit / push / tag 後，由控制台續派 RELEASE 先盤點正式資源再移動
+- 未把尚未做的正式上線、FORMAL、n8n 改動寫成 PASS
+- 本輪 DOC 未修改程式碼、未 commit、未 push、未打 tag、未部署
+
+---
+
 ### DOC｜Codex 長任務通知模式 live 驗收紀錄
 
 本輪 `PLine｜DOC｜文件與規格整理` 記錄 Codex 長任務通知模式 live LINE 驗收結果。

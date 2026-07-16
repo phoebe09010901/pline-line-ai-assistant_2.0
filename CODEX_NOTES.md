@@ -8,7 +8,7 @@
 
 先讓功能真正跑通，再增加功能。
 
-本輪 V3 文件結論以 `v3/codex-line-inbox` 的 closed-loop verification 為準，不以舊 V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+本輪 V3 文件結論以 V3.1 阿光統一人格與自然任務回覆基準為準，不以舊 V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
 
 目前階段採用：
 
@@ -18,7 +18,58 @@
 
 ---
 
-# V3.0 mainline｜Codex LINE closed-loop verification
+# V3.1 mainline｜阿光統一人格與自然任務回覆基準
+
+## V3.1 基準狀態
+
+- 基準名稱：V3.1 阿光統一人格與自然任務回覆基準
+- 日期：2026-07-16
+- branch：`v3/codex-line-inbox`
+- V3.1 前置程式基準 commit：`33a3ce62270dd462456d00a9272d381bac8264c2`
+- V3.0 歷史基準 commit：`7287cf5f254ca45782d7f5b262b1e698f16e7622`
+- V3.0 tag：`v3.0-codex-line-inbox-complete`
+- V3.0 checkpoint tag：`v3.0-inbox-receive-checkpoint`
+- RELEASE 預計建立 tag：`v3.1-aguang-unified-assistant-baseline`
+- tag 狀態：待 RELEASE 建立；DOC 不建立 tag
+
+目前完成的是 V3.1 測試專案基準可收尾；正式「阿光智能助理」搬遷尚未完成。正式搬遷必須等 RELEASE 完成 V3.1 baseline commit / push / tag 後，由控制台續派 RELEASE 先盤點正式資源再移動。
+
+不得把尚未做的正式上線、FORMAL、n8n 改動或正式搬遷寫成 PASS。
+
+## V3.1 TEST 驗收證據
+
+- TEST final：`BASELINE_READY_FOR_DOC: yes`
+- 新增任務：`01KXMYS1E37N8BVRBH26KE44PF`
+- 修改任務：`01KXMZ12D77ZFTRBGWMXCNH6KH`
+- 刪除任務：`01KXMZGT6VFHYJ3Y8NW3VG9JK0`
+- 驗收唯一碼：`V31T1558R2`
+- 活躍檔案：`idea_2026-07-16_15-56-56.json`
+- 新增 / 修改使用資料夾：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST`
+- 刪除移入資料夾：`/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除`
+- KV inbox final：pending=0、processing=0、completed=22、failed=11
+- duplicate task=0、duplicate execution=0、duplicate ACK=0、duplicate final push=0
+- LINE final push：HTTP 200
+- 阿光對外人格安全：PASS
+
+阿光對菲比顯示訊息統一使用第一人稱「我」，不得出現 Codex / monitor / Worker / Gateway / 已交給 Codex 等內部角色或工程欄位。
+
+## V3.1 任務回覆規格
+
+- 只有需要修改檔案、整理專案、執行程式、部署、Computer Use、多步驟工作或長時間分析的任務，才進入 Codex 長任務模式。
+- 簡單想法新增、搜尋、修改、刪除與快速任務可 quick 直接完成，不進入長任務通知流程。
+- monitor 只原樣推送 `ack_user_message` / `progress_user_message` / `final_user_message`，不依任務類型套固定內容。
+- LINE 不得顯示內部 task_id、PID、stdout、stderr、本機路徑或工程欄位。
+
+## V3.1 FIX 待 RELEASE 收尾
+
+- 新增 `codex-inbox/idea-tools.js`，支援 search / update / delete；delete 移入 `_02/想法紀錄_TEST_已刪除`，不硬刪。
+- 更新 `codex-inbox/monitor.js`，引導執行端用 `idea-tools.js` 處理想法搜尋 / 修改 / 刪除，`local-query-api` 僅負責 count / list。
+- FIX validation PASS：`node --check`、`git diff --check`、`/tmp mock search/update/delete`、真實 Dropbox read-only search、阿光安全防漏檢查。
+- monitor 已由 FIX 重啟；PID 只可寫入技術文件，不得出現在 LINE 對外訊息。
+
+---
+
+# V3.0 history｜Codex LINE closed-loop verification
 
 ## V3.0 真實閉環驗收
 

@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile);
 const KV_NAMESPACE_ID = process.env.CODEX_INBOX_KV_NAMESPACE_ID || "ba842d5662f94e60bfeb4a85e9f0e36c";
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
+const DROPBOX_DELETED_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除";
+const IDEA_TOOLS = path.join(ROOT, "idea-tools.js");
 const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
 const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/progress-push";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
@@ -251,8 +253,13 @@ async function executeWithCodex(task) {
     `display_task_id：${task.display_task_id || ""}`,
     `專案根目錄：${PROJECT_ROOT}`,
     `既有 Dropbox 想法資料夾：${DROPBOX_DIR}`,
+    `既有 Dropbox 想法刪除資料夾：${DROPBOX_DELETED_DIR}`,
+    `想法修改/刪除工具：${IDEA_TOOLS}`,
     "請自行理解需求、選擇現有工具並真正完成工作。不要做預先 regex 分類，不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
     "若原句是保存想法/備忘，直接使用既有本機工具新增一份 JSON，保留 original_text，完成後停止。",
+    "若原句是修改既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js update --query <定位文字> --text <修改後文字>；若只有最後一筆語意，才可加 --latest。",
+    "若原句是刪除既有想法，請使用想法修改/刪除工具執行：node codex-inbox/idea-tools.js search --query <定位文字>，確認唯一目標後 node codex-inbox/idea-tools.js delete --query <定位文字>；刪除必須移到既有 Dropbox 想法刪除資料夾，不可直接硬刪。",
+    "local-query-api 只可用於 count/list 查詢；不要把它當成修改或刪除工具。",
     `original_text：${task.original_text}`,
     "",
     "工作完成後，請產生 technical_summary 與 final_user_message。",
