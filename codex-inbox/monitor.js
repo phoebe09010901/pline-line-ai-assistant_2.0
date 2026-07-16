@@ -94,11 +94,11 @@ async function executeWithCodex(task) {
     "你是菲比 LINE 智能助理 V3 的 Codex 執行器。只處理這一筆完整原句，不要做預先 regex 分類。",
     `專案根目錄：${PROJECT_ROOT}`,
     `既有 Dropbox 想法資料夾：${DROPBOX_DIR}`,
-    "低風險想法/備忘保存可直接使用既有本機工具；不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
+    "若原句是保存想法/備忘，直接使用既有本機工具新增一份 JSON，保留 original_text，完成後停止；不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
     `original_text：${task.original_text}`,
   ].join("\n");
   const { stdout } = await execFileAsync("/opt/homebrew/bin/codex", [
-    "exec", "--ephemeral", "--sandbox", "danger-full-access", "--cd", PROJECT_ROOT,
+    "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "danger-full-access", "-c", "model_reasoning_effort=low", "--cd", PROJECT_ROOT,
     "--add-dir", DROPBOX_DIR, prompt,
   ], { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
   const summary = stdout.trim().split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 500);
