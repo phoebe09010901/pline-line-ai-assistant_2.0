@@ -8,6 +8,24 @@
 
 本輪文件結論以 V3 mainline 為準，不以舊 V2 / 第一版 Dropbox baseline 作為本輪結論。
 
+### V3 receive-only live checkpoint
+
+V3.0 Codex LINE Inbox 已完成 RELEASE，但本次只保存 receive-only checkpoint。
+
+- existing release commit：`7287cf5f254ca45782d7f5b262b1e698f16e7622`
+- existing tag：`v3.0-codex-line-inbox-complete`
+- 以上 commit / tag 保留
+- TEST LINE 三則真實訊息均收到 `收到，已交給 Codex ✨`
+- LINE Webhook 接收 PASS
+- 即時 ACK PASS
+- duplicate reply 初步為 0
+- Codex inbox task 是否實際建立待檔案核對
+- Codex monitor 常駐 / 領取 / 自主理解 / 工具執行尚未證實
+- 尚未收到第二段 Codex 最終執行結果，final LINE result 不得標 PASS
+- checkpoint 定位：`LINE 收件段完成，Codex 後段執行尚待修正`
+- 不描述為 V3 全流程完成
+- 本輪尚未修正 monitor、Worker、local-query-api、n8n
+
 ### V2 dirty 處理
 
 - archive branch：`archive/v2-uncommitted-before-v3`
