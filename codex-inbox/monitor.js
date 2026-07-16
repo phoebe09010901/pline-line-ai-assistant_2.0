@@ -11,6 +11,7 @@ const KV_NAMESPACE_ID = process.env.CODEX_INBOX_KV_NAMESPACE_ID || "ba842d5662f9
 const PROJECT_ROOT = path.resolve(ROOT, "..");
 const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
 const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
+const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/progress-push";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
@@ -85,6 +86,8 @@ export async function scanOnce(handler = executeAndPush) {
         claim.task.completed_at = now();
         claim.task.technical_summary = String(result?.technical_summary || "").slice(0, 4_000);
         claim.task.final_user_message = String(result?.final_user_message || "").slice(0, MAX_LINE_MESSAGE_LENGTH);
+        claim.task.progress_stage = result?.progress_stage || null;
+        claim.task.progress_user_message = String(result?.progress_user_message || "").slice(0, MAX_LINE_MESSAGE_LENGTH) || null;
         claim.task.result_summary = claim.task.technical_summary.slice(0, 500);
         claim.task.result_status = result?.result_status || "completed";
         await fs.writeFile(claim.path, `${JSON.stringify(claim.task, null, 2)}\n`);
@@ -140,7 +143,7 @@ function extractJsonObject(text) {
   return start >= 0 && end > start ? trimmed.slice(start, end + 1) : null;
 }
 
-function parseCodexResult(lastMessage) {
+function parseCodexResult(lastMessage, task) {
   const jsonText = extractJsonObject(lastMessage);
   if (!jsonText) throw new Error("Codex did not provide a parseable result object");
   let parsed;
@@ -151,11 +154,19 @@ function parseCodexResult(lastMessage) {
   }
   const technicalSummary = typeof parsed.technical_summary === "string" ? parsed.technical_summary.trim() : "";
   const finalUserMessage = typeof parsed.final_user_message === "string" ? parsed.final_user_message.trim() : "";
+  const progressStage = typeof parsed.progress_stage === "string" ? parsed.progress_stage.trim() : "";
+  const progressUserMessage = typeof parsed.progress_user_message === "string" ? parsed.progress_user_message.trim() : "";
   if (!technicalSummary) throw new Error("Codex did not provide technical_summary");
   validateFinalUserMessage(finalUserMessage);
+  if (task?.execution_mode === "long") {
+    if (!progressStage) throw new Error("Codex did not provide progress_stage");
+    validateFinalUserMessage(progressUserMessage);
+  }
   return {
     technical_summary: technicalSummary.slice(0, 4_000),
     final_user_message: finalUserMessage,
+    progress_stage: progressStage || null,
+    progress_user_message: progressUserMessage || null,
     result_status: "completed",
   };
 }
@@ -179,6 +190,8 @@ function validateFinalUserMessage(message) {
 async function executeWithCodex(task) {
   const prompt = [
     "你是菲比 LINE 智能助理 V3 的 Codex 執行器。你收到的是菲比從 LINE 傳來的原始訊息。",
+    `execution_mode：${task.execution_mode || "quick"}`,
+    `display_task_id：${task.display_task_id || ""}`,
     `專案根目錄：${PROJECT_ROOT}`,
     `既有 Dropbox 想法資料夾：${DROPBOX_DIR}`,
     "請自行理解需求、選擇現有工具並真正完成工作。不要做預先 regex 分類，不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
@@ -186,6 +199,7 @@ async function executeWithCodex(task) {
     `original_text：${task.original_text}`,
     "",
     "工作完成後，請產生 technical_summary 與 final_user_message。",
+    "如果 execution_mode 是 long，也必須產生 progress_stage 與 progress_user_message；progress_user_message 是自然的進度通知，由你依實際狀態撰寫，不要使用內部 task_id、PID、stdout、stderr、本機路徑或工程欄位。",
     "technical_summary 保存完整工程紀錄，可包含檔名、路徑、工具結果及診斷資訊；它只會寫入 completed task，不會推送 LINE。",
     "final_user_message 是可以直接傳送給菲比的 LINE 最終回覆。",
     "LINE 最終回覆規則：",
@@ -211,7 +225,7 @@ async function executeWithCodex(task) {
     "20. 回覆應適合手機閱讀。",
     "",
     "最後請只輸出一個 JSON object，不要加 Markdown、不要加程式碼區塊、不要加其他文字。格式如下：",
-    "{\"technical_summary\":\"完整工程紀錄\",\"final_user_message\":\"適合直接推送 LINE 的繁體中文回覆\"}",
+    "{\"progress_stage\":\"已完成\",\"progress_user_message\":\"自然的進度通知\",\"technical_summary\":\"完整工程紀錄\",\"final_user_message\":\"適合直接推送 LINE 的繁體中文回覆\"}",
   ].join("\n");
   const outputFile = path.join("/tmp", `pline-codex-${String(task.task_id).replace(/[^A-Za-z0-9_-]/g, "_")}.last`);
   await fs.rm(outputFile, { force: true });
@@ -224,7 +238,7 @@ async function executeWithCodex(task) {
   if (!lastMessage.trim() || /Reading additional input from stdin/i.test(lastMessage)) {
     throw new Error(`Codex returned no execution summary: exit_code=${exitCode} stdout=${stdout.trim().slice(-200)} stderr=${stderr.trim().slice(-300)}`);
   }
-  return parseCodexResult(lastMessage);
+  return parseCodexResult(lastMessage, task);
 }
 
 async function pushFinalResult(task, result) {
@@ -234,6 +248,18 @@ async function pushFinalResult(task, result) {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ task_id: task.task_id, text }),
+  });
+  const body = await response.json().catch(() => ({}));
+  return { pushed: response.ok && body.ok === true, status: response.status, reason: body.error };
+}
+
+async function pushProgressResult(task, result) {
+  if (task.execution_mode !== "long" || !result.progress_user_message) return null;
+  validateFinalUserMessage(result.progress_user_message);
+  const response = await fetch(PROGRESS_PUSH_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task_id: task.task_id, text: result.progress_user_message }),
   });
   const body = await response.json().catch(() => ({}));
   return { pushed: response.ok && body.ok === true, status: response.status, reason: body.error };
@@ -276,9 +302,17 @@ export async function scanKvOnce(handler = executeAndPush) {
         task.completed_at = now();
         task.technical_summary = String(result?.technical_summary || "").slice(0, 4_000);
         task.final_user_message = String(result?.final_user_message || "").slice(0, MAX_LINE_MESSAGE_LENGTH);
+        task.progress_stage = result?.progress_stage || null;
+        task.progress_user_message = String(result?.progress_user_message || "").slice(0, MAX_LINE_MESSAGE_LENGTH) || null;
         task.result_summary = task.technical_summary.slice(0, 500);
         task.result_status = result?.result_status || "completed";
         if (!(await kvGetOrNull(failedKey))) await kvPut(completedKey, JSON.stringify(task));
+        const progress = await pushProgressResult(task, result);
+        if (progress) {
+          task.progress_push_status = progress.pushed ? "sent" : "failed";
+          task.progress_push_http_status = progress.status;
+          if (!progress.pushed) task.progress_push_error = progress.reason || "progress_push_failed";
+        }
         const push = await pushFinalResult(task, result);
         task.final_push_status = push.pushed ? "sent" : "failed";
         task.final_push_http_status = push.status;

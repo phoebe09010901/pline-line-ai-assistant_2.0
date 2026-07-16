@@ -1,7 +1,13 @@
 const LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply";
 const RECEIVED_REPLY = "收到，已交給 Codex ✨";
+const LONG_TASK_REPLY = "已收到任務，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
+const LONG_TASK_HINTS = [
+  "修改檔案", "整理專案", "執行程式", "部署", "computer use", "Computer Use",
+  "多步驟", "長時間分析", "修正程式", "實作", "開發", "重構",
+  "檢查專案", "跑測試", "驗證結果", "建立網站", "產生報告",
+];
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -20,15 +26,31 @@ function taskId(event, lineEventId) {
   return event.webhookEventId || lineEventId;
 }
 
+function displayTaskId() {
+  const timePart = Date.now().toString(36).toUpperCase().slice(-6);
+  const randomPart = Math.random().toString(36).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4).padEnd(4, "0");
+  return `P-${timePart}-${randomPart}`;
+}
+
+function executionMode(text) {
+  return LONG_TASK_HINTS.some((hint) => text.includes(hint)) ? "long" : "quick";
+}
+
 async function writeInboxTask(event, env) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
     : typeof event.replyToken === "string" ? event.replyToken : `event-${Date.now()}`;
   const id = taskId(event, lineEventId);
+  const mode = executionMode(event.message.text);
+  const displayId = displayTaskId();
   const key = `pending/${id}.json`;
   const seenKey = `events/${lineEventId}`;
   const task = {
     task_id: id,
+    display_task_id: displayId,
+    execution_mode: mode,
+    progress_stage: mode === "long" ? "queued" : null,
+    progress_user_message: null,
     line_event_id: lineEventId,
     text: event.message.text,
     original_text: event.message.text,
@@ -45,17 +67,36 @@ async function writeInboxTask(event, env) {
   if (await env.CODEX_INBOX.get(seenKey)) return { duplicate: true };
   await env.CODEX_INBOX.put(seenKey, id);
   await env.CODEX_INBOX.put(key, JSON.stringify(task));
-  return { duplicate: false };
+  return { duplicate: false, task };
 }
 
-async function replyToLine(event, env) {
+async function replyToLine(event, env, task) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) throw new Error("LINE_CHANNEL_ACCESS_TOKEN binding is missing");
+  const text = task?.execution_mode === "long"
+    ? LONG_TASK_REPLY.replace("{display_task_id}", task.display_task_id)
+    : RECEIVED_REPLY;
   const response = await fetch(LINE_REPLY_API_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text: RECEIVED_REPLY }] }),
+    body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text }] }),
   });
   if (!response.ok) console.error("line_reply_failed", { status: response.status });
+}
+
+async function pushLineText(taskId, text, env) {
+  const task = taskId && env.CODEX_INBOX
+    ? (await env.CODEX_INBOX.get(`completed/${taskId}.json`, "json"))
+      || (await env.CODEX_INBOX.get(`processing/${taskId}.json`, "json"))
+      || (await env.CODEX_INBOX.get(`failed/${taskId}.json`, "json"))
+    : null;
+  if (!task?.user_id || typeof text !== "string" || !text.trim()) return json({ ok: false, error: "missing_task_target" }, 400);
+  if (!env.LINE_CHANNEL_ACCESS_TOKEN) return json({ ok: false, error: "missing_runtime_binding" }, 500);
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({ to: task.user_id, messages: [{ type: "text", text }] }),
+  });
+  return json({ ok: response.ok, status: response.status });
 }
 
 export default {
@@ -64,15 +105,12 @@ export default {
     if (request.method === "POST" && new URL(request.url).pathname === "/internal/final-push") {
       let body;
       try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
-      const task = body?.task_id && env.CODEX_INBOX ? await env.CODEX_INBOX.get(`completed/${body.task_id}.json`, "json") : null;
-      if (!task?.user_id || typeof body.text !== "string" || !body.text.trim()) return json({ ok: false, error: "missing_task_target" }, 400);
-      if (!env.LINE_CHANNEL_ACCESS_TOKEN) return json({ ok: false, error: "missing_runtime_binding" }, 500);
-      const response = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify({ to: task.user_id, messages: [{ type: "text", text: body.text }] }),
-      });
-      return json({ ok: response.ok, status: response.status });
+      return pushLineText(body?.task_id, body?.text, env);
+    }
+    if (request.method === "POST" && new URL(request.url).pathname === "/internal/progress-push") {
+      let body;
+      try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
+      return pushLineText(body?.task_id, body?.text, env);
     }
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     let payload;
@@ -81,7 +119,7 @@ export default {
       if (event?.type !== "message" || event?.message?.type !== "text" || typeof event.replyToken !== "string") continue;
       try {
         const result = await writeInboxTask(event, env);
-        if (!result.duplicate) await replyToLine(event, env);
+        if (!result.duplicate) await replyToLine(event, env, result.task);
       } catch (error) {
         console.error("inbox_task_failed", { status: "error", summary: error instanceof Error ? error.message : String(error) });
       }
