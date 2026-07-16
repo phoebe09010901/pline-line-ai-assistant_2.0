@@ -8,6 +8,8 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const INBOX_ROOT = ROOT;
 const execFileAsync = promisify(execFile);
 const KV_NAMESPACE_ID = process.env.CODEX_INBOX_KV_NAMESPACE_ID || "ba842d5662f94e60bfeb4a85e9f0e36c";
+const PROJECT_ROOT = path.resolve(ROOT, "..");
+const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
@@ -29,7 +31,7 @@ async function claimOne(file) {
   return { file, task, path: processing };
 }
 
-export async function scanOnce(handler = async () => ({ result_summary: "handed to Codex", result_status: "completed" })) {
+export async function scanOnce(handler = executeAndPush) {
   if (localScanLock) return;
   localScanLock = true;
   try {
@@ -86,7 +88,47 @@ async function kvDelete(key) {
   await kvCommand(["delete", key]);
 }
 
-export async function scanKvOnce(handler = async () => ({ result_summary: "handed to Codex", result_status: "completed" })) {
+async function executeWithCodex(task) {
+  const prompt = [
+    "你是菲比 LINE 智能助理 V3 的 Codex 執行器。只處理這一筆完整原句，不要做預先 regex 分類。",
+    `專案根目錄：${PROJECT_ROOT}`,
+    `既有 Dropbox 想法資料夾：${DROPBOX_DIR}`,
+    "低風險想法/備忘保存可直接使用既有本機工具；不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
+    `original_text：${task.original_text}`,
+  ].join("\n");
+  const { stdout } = await execFileAsync("/opt/homebrew/bin/codex", [
+    "exec", "--ephemeral", "--sandbox", "danger-full-access", "--cd", PROJECT_ROOT,
+    "--add-dir", DROPBOX_DIR, prompt,
+  ], { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
+  const summary = stdout.trim().split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 500);
+  if (!summary) throw new Error("Codex returned no execution summary");
+  return { result_summary: summary, result_status: "completed" };
+}
+
+async function pushFinalResult(task, result) {
+  const userId = task.user_id || task.line_user_id;
+  if (!userId) return { pushed: false, reason: "missing_user_id" };
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return { pushed: false, reason: "missing_runtime_binding" };
+  const text = typeof result.final_reply === "string" && result.final_reply.trim()
+    ? result.final_reply.trim()
+    : `已完成：「${task.original_text}」✨`;
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ to: userId, messages: [{ type: "text", text }] }),
+  });
+  return { pushed: response.ok, status: response.status };
+}
+
+async function executeAndPush(task) {
+  const result = await executeWithCodex(task);
+  const push = await pushFinalResult(task, result);
+  if (!push.pushed) throw new Error(`Codex completed but final LINE push unavailable: ${push.reason}`);
+  return { ...result, result_summary: `${result.result_summary} LINE push HTTP ${push.status}` };
+}
+
+export async function scanKvOnce(handler = executeAndPush) {
   if (localScanLock) return;
   localScanLock = true;
   try {
