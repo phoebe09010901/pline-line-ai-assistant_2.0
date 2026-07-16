@@ -157,10 +157,10 @@ function parseCodexResult(lastMessage, task) {
   const progressStage = typeof parsed.progress_stage === "string" ? parsed.progress_stage.trim() : "";
   const progressUserMessage = typeof parsed.progress_user_message === "string" ? parsed.progress_user_message.trim() : "";
   if (!technicalSummary) throw new Error("Codex did not provide technical_summary");
-  validateFinalUserMessage(finalUserMessage);
+  validateFinalUserMessage(finalUserMessage, task);
   if (task?.execution_mode === "long") {
     if (!progressStage) throw new Error("Codex did not provide progress_stage");
-    validateFinalUserMessage(progressUserMessage);
+    validateFinalUserMessage(progressUserMessage, task);
   }
   return {
     technical_summary: technicalSummary.slice(0, 4_000),
@@ -171,7 +171,12 @@ function parseCodexResult(lastMessage, task) {
   };
 }
 
-function validateFinalUserMessage(message) {
+function allowsTechnicalDetails(task) {
+  return /(?:技術細節|技術紀錄|工程紀錄|工程細節|debug|除錯|診斷|內部欄位|stdout|stderr|PID)/i
+    .test(String(task?.original_text || ""));
+}
+
+export function validateFinalUserMessage(message, task = {}) {
   if (!message) throw new Error("Codex did not provide a valid LINE final message");
   if (message.length > MAX_LINE_MESSAGE_LENGTH) throw new Error("Codex LINE final message is too long");
   const blockedPatterns = [
@@ -182,7 +187,21 @@ function validateFinalUserMessage(message) {
     /\bsk-[A-Za-z0-9_-]+/,
     /\b[\w.-]+\.json\b/i,
   ];
+  const internalRolePatterns = [
+    /\bCodex\b/i,
+    /\bmonitor\b/i,
+    /\bWorker\b/i,
+    /\bGateway\b/i,
+    /已交給\s*Codex/i,
+    /Codex\s*正在處理/i,
+    /等待\s*Codex\s*回覆/i,
+    /系統已將任務交給阿光/,
+    /阿光已收到系統轉交的任務/,
+  ];
   if (blockedPatterns.some((pattern) => pattern.test(message))) {
+    throw new Error("Codex did not provide a valid LINE final message");
+  }
+  if (!allowsTechnicalDetails(task) && internalRolePatterns.some((pattern) => pattern.test(message))) {
     throw new Error("Codex did not provide a valid LINE final message");
   }
 }
@@ -202,6 +221,10 @@ async function executeWithCodex(task) {
     "如果 execution_mode 是 long，也必須產生 progress_stage 與 progress_user_message；progress_user_message 是自然的進度通知，由你依實際狀態撰寫，不要使用內部 task_id、PID、stdout、stderr、本機路徑或工程欄位。",
     "technical_summary 保存完整工程紀錄，可包含檔名、路徑、工具結果及診斷資訊；它只會寫入 completed task，不會推送 LINE。",
     "final_user_message 是可以直接傳送給菲比的 LINE 最終回覆。",
+    "對菲比顯示的 progress_user_message 與 final_user_message，一律使用阿光同一人格，並以第一人稱「我」回報。",
+    "一般 LINE 對話不得把 LINE 端、Gateway、monitor、Worker 或 Codex 描述成不同角色；除非菲比明確詢問技術細節，否則不要在對外訊息出現 Codex、monitor、Worker、Gateway 等內部名稱。",
+    "對外訊息不得出現「已交給 Codex」、「Codex 正在處理」、「系統已將任務交給阿光」、「等待 Codex 回覆」或「阿光已收到系統轉交的任務」。",
+    "對外訊息可自然使用「我收到任務了」、「我正在處理」、「我正在執行」、「我正在驗證結果」、「我已完成」或「我目前遇到問題」等第一人稱語氣，但不要固定成單一句型。",
     "LINE 最終回覆規則：",
     "1. 使用自然、簡單的繁體中文。",
     "2. 像助理向菲比回報，不像工程紀錄。",
@@ -243,7 +266,7 @@ async function executeWithCodex(task) {
 
 async function pushFinalResult(task, result) {
   const text = typeof result.final_user_message === "string" ? result.final_user_message.trim() : "";
-  validateFinalUserMessage(text);
+  validateFinalUserMessage(text, task);
   const response = await fetch(FINAL_PUSH_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -255,7 +278,7 @@ async function pushFinalResult(task, result) {
 
 async function pushProgressResult(task, result) {
   if (task.execution_mode !== "long" || !result.progress_user_message) return null;
-  validateFinalUserMessage(result.progress_user_message);
+  validateFinalUserMessage(result.progress_user_message, task);
   const response = await fetch(PROGRESS_PUSH_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -1,6 +1,7 @@
 const LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply";
-const RECEIVED_REPLY = "收到，已交給 Codex ✨";
-const LONG_TASK_REPLY = "已收到任務，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後會再通知你。";
+const QUICK_ACK_REPLY = "我收到訊息了，馬上幫你處理 ✨";
+const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨";
+const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
 const LONG_TASK_HINTS = [
@@ -36,6 +37,11 @@ function executionMode(text) {
   return LONG_TASK_HINTS.some((hint) => text.includes(hint)) ? "long" : "quick";
 }
 
+export function ackUserMessage(text, mode, displayId) {
+  if (mode === "long") return LONG_TASK_REPLY.replace("{display_task_id}", displayId);
+  return /[?？]/.test(text) ? QUICK_QUESTION_ACK_REPLY : QUICK_ACK_REPLY;
+}
+
 async function writeInboxTask(event, env) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
@@ -49,6 +55,7 @@ async function writeInboxTask(event, env) {
     task_id: id,
     display_task_id: displayId,
     execution_mode: mode,
+    ack_user_message: ackUserMessage(event.message.text, mode, displayId),
     progress_stage: mode === "long" ? "queued" : null,
     progress_user_message: null,
     line_event_id: lineEventId,
@@ -72,9 +79,7 @@ async function writeInboxTask(event, env) {
 
 async function replyToLine(event, env, task) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) throw new Error("LINE_CHANNEL_ACCESS_TOKEN binding is missing");
-  const text = task?.execution_mode === "long"
-    ? LONG_TASK_REPLY.replace("{display_task_id}", task.display_task_id)
-    : RECEIVED_REPLY;
+  const text = task?.ack_user_message || ackUserMessage(event.message.text, task?.execution_mode, task?.display_task_id);
   const response = await fetch(LINE_REPLY_API_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
