@@ -97,11 +97,16 @@ async function executeWithCodex(task) {
     "若原句是保存想法/備忘，直接使用既有本機工具新增一份 JSON，保留 original_text，完成後停止；不得掃描整個專案。不得操作 FORMAL、正式網站、付款、Gmail、Calendar 或對外發布。",
     `original_text：${task.original_text}`,
   ].join("\n");
-  const { stdout } = await execFileAsync("/opt/homebrew/bin/codex", [
+  const outputFile = path.join("/tmp", `pline-codex-${String(task.task_id).replace(/[^A-Za-z0-9_-]/g, "_")}.last`);
+  await fs.rm(outputFile, { force: true });
+  const { stdout, stderr } = await execFileAsync("/opt/homebrew/bin/codex", [
     "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "danger-full-access", "-c", "model_reasoning_effort=low", "--cd", PROJECT_ROOT,
-    "--add-dir", DROPBOX_DIR, prompt,
+    "--add-dir", DROPBOX_DIR, "-o", outputFile, prompt,
   ], { timeout: 120_000, maxBuffer: 2 * 1024 * 1024 });
-  const summary = stdout.trim().split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 500);
+  const lastMessage = await fs.readFile(outputFile, "utf8").catch(() => "");
+  await fs.rm(outputFile, { force: true });
+  const summary = (lastMessage.trim() || stdout.trim()).split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 500);
+  if (!summary && stderr.trim()) throw new Error(`Codex returned no execution summary: ${stderr.trim().slice(-300)}`);
   if (!summary) throw new Error("Codex returned no execution summary");
   return { result_summary: summary, result_status: "completed" };
 }
