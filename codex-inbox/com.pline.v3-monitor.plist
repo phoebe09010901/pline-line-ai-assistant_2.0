@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pline.v3-codex-inbox-monitor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02/codex-inbox/monitor.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEX_INBOX_MODE</key>
+    <string>kv</string>
+    <key>CODEX_INBOX_KV_NAMESPACE_ID</key>
+    <string>ba842d5662f94e60bfeb4a85e9f0e36c</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>
