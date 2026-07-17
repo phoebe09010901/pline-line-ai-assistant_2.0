@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.2";
+const WORKER_VERSION = "V3.4.3";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -297,6 +297,15 @@ async function removePendingTaskFromQueue(env = {}, pendingKey) {
   if (!keys) return null;
   const queuedKeys = keys.filter((key) => typeof key === "string" && key !== pendingKey);
   if (queuedKeys.length === keys.length) return raw;
+  if (!queuedKeys.length) {
+    await env.CODEX_INBOX.delete(queueKey);
+    return {
+      keys: [],
+      updated_at: taipeiNow(),
+      environment: runtimeEnvironment(env),
+      task_namespace: taskNamespace(env),
+    };
+  }
   const payload = {
     keys: queuedKeys,
     updated_at: taipeiNow(),
@@ -415,6 +424,8 @@ export async function writeInboxTask(event, env, request = null) {
     await env.CODEX_INBOX.put(writeKey, value, options);
   };
   try {
+    await putTracked(key, JSON.stringify(task));
+    await enqueuePendingTask(env, key);
     await putTracked(seenKey, id);
     await putTracked(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "pending", created_at: createdAt }));
     if (operationKey) {
@@ -425,8 +436,6 @@ export async function writeInboxTask(event, env, request = null) {
         created_at: createdAt,
       }), { expirationTtl: OPERATION_FINGERPRINT_TTL_SECONDS });
     }
-    await putTracked(key, JSON.stringify(task));
-    await enqueuePendingTask(env, key);
   } catch (error) {
     await Promise.allSettled(writtenKeys.map((writtenKey) => env.CODEX_INBOX.delete(writtenKey)));
     await removePendingTaskFromQueue(env, key).catch(() => null);
