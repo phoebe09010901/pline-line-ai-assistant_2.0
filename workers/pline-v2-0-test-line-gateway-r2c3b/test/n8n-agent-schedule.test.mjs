@@ -105,10 +105,12 @@ async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
     assert.equal(processingEntries.length, 1);
     const task = JSON.parse(processingEntries[0][1]);
     const execution = await kv.get(`executions/${task.idempotency_hash}`, "json");
-    assert.notEqual(task.n8n_pipeline_phase, "created");
+    assert.notEqual(task.n8n_pipeline_phase, "pipeline_scheduled");
     assert.ok(task.pipeline_scheduled_at, "LINE POST n8n_agent route must schedule before ACK/background completion");
-    assert.notEqual(execution.phase, "created");
+    assert.ok(task.pipeline_started_at, "LINE POST n8n_agent route must write pipeline_started before waitUntil background work");
+    assert.notEqual(execution.phase, "pipeline_scheduled");
     assert.equal(execution.pipeline_scheduled_at, task.pipeline_scheduled_at);
+    assert.equal(execution.pipeline_started_at, task.pipeline_started_at);
     for (let attempt = 0; attempt < 20 && !releaseLineAck; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }

@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.11";
+const WORKER_VERSION = "V3.4.12";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -981,8 +981,10 @@ async function runN8nAgentPipeline(event, result, env = {}) {
   let ackSent = false;
   try {
     await withTimeout(async () => {
-      const pipelineStartedAt = taipeiNow();
-      await markN8nAgentPhase(result.task, env, "pipeline_started", { pipeline_started_at: pipelineStartedAt });
+      if (!result.task.pipeline_started_at) {
+        const pipelineStartedAt = taipeiNow();
+        await markN8nAgentPhase(result.task, env, "pipeline_started", { pipeline_started_at: pipelineStartedAt });
+      }
       const ackStartedAt = taipeiNow();
       await markN8nAgentPhase(result.task, env, "ack_started", { ack_started_at: ackStartedAt });
       const ack = await replyToLine(event, env, result.task, {
@@ -1013,6 +1015,9 @@ async function scheduleN8nAgentPipeline(event, result, env = {}, ctx) {
   const scheduledAt = result.task.pipeline_scheduled_at || taipeiNow();
   if (!result.task.pipeline_scheduled_at) {
     await markN8nAgentPhase(result.task, env, "pipeline_scheduled", { pipeline_scheduled_at: scheduledAt });
+  }
+  if (!result.task.pipeline_started_at) {
+    await markN8nAgentPhase(result.task, env, "pipeline_started", { pipeline_started_at: taipeiNow() });
   }
   if (hasWaitUntil(ctx)) {
     try {
