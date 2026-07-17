@@ -4,6 +4,36 @@
 
 ## 2026-07-17
 
+### RELEASE｜FORMAL resource creation gate
+
+本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 完成 FORMAL resource creation gate，但未做 live cutover。
+
+完成項目：
+
+- 建立 FORMAL KV namespace：`PLINE_FORMAL_CODEX_INBOX`
+- FORMAL KV namespace id：`b32de14ccd644b94bd9128abf2b22792`
+- 替換 `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml` 的 `env.formal` KV placeholder。
+- 建立 FORMAL Worker shell：`pline-v2-0-formal-line-gateway`
+- FORMAL Worker current version id：`74970ada-24b7-40ed-a7b4-d5ff0e68a810`
+- Cloudflare 回報：`No targets deployed for pline-v2-0-formal-line-gateway`
+- 新增未啟動的 FORMAL monitor template：`codex-inbox/com.pline.formal-monitor.template.plist`
+
+未完成 / 不可標 PASS：
+
+- 未設定 FORMAL secret value。
+- 未建立 route / custom domain。
+- 未切 LINE Developers webhook。
+- 未操作 n8n formal workflow。
+- 未啟動 FORMAL monitor。
+- 未做 FORMAL LINE 真實驗收。
+
+```text
+FORMAL_RESOURCE_GATE_STATUS=completed_no_live_cutover
+FORMAL_ALLOWED=false
+```
+
+---
+
 ### FIX｜FORMAL Gate source/config 參數化 precheck
 
 本輪 `PLine｜FIX｜小修正與命名同步` 只做 FORMAL Gate 前 source/config 參數化與必要小修，未部署、未建立 FORMAL 資源、未設定 secret。

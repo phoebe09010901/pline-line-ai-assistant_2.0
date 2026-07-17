@@ -4,6 +4,46 @@
 
 ---
 
+# 2026-07-17 RELEASE｜FORMAL resource creation gate
+
+本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 只做 FORMAL resource creation gate，不做 live cutover，不切 LINE webhook，不操作 n8n live，不宣告 FORMAL PASS。
+
+## 已建立 / 已確認
+
+- FORMAL KV namespace 已建立：`PLINE_FORMAL_CODEX_INBOX`
+- FORMAL KV namespace id：`b32de14ccd644b94bd9128abf2b22792`
+- `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml` 的 `env.formal` KV placeholder 已替換為 FORMAL KV id。
+- FORMAL Worker resource shell 已建立：`pline-v2-0-formal-line-gateway`
+- FORMAL Worker current version id：`74970ada-24b7-40ed-a7b4-d5ff0e68a810`
+- Cloudflare deploy 回報：`No targets deployed for pline-v2-0-formal-line-gateway`
+- FORMAL Queue：未建立，Wrangler queue list 仍為空。
+- FORMAL monitor template 已新增：`codex-inbox/com.pline.formal-monitor.template.plist`
+
+## 尚未完成 / 不可標 PASS
+
+- FORMAL Worker secrets 尚未設定；`wrangler secret list --name pline-v2-0-formal-line-gateway` 目前為空。
+- 必要 secret names plan：`LINE_CHANNEL_ACCESS_TOKEN`、`PLINE_ADMIN_LINE_USER_IDS`
+- 視 wake 設計可能需要：`CODEX_MONITOR_WAKE_URL` / `CODEX_MONITOR_WAKE_TOKEN` 或相容別名。
+- 未建立 route / custom domain。
+- 未切 LINE Developers webhook。
+- 未操作 n8n formal workflow。
+- 未啟動 FORMAL monitor。
+- 未建立或驗證 FORMAL Dropbox / idea/query data path。
+- 未做 FORMAL LINE 真實驗收。
+
+```text
+FORMAL_RESOURCE_GATE_STATUS=completed_no_live_cutover
+FORMAL_KV_CREATED=true
+FORMAL_WORKER_SHELL_CREATED=true
+FORMAL_SECRET_VALUES_SET=false
+FORMAL_MONITOR_STARTED=false
+FORMAL_LINE_WEBHOOK_CUTOVER=false
+FORMAL_N8N_LIVE=false
+FORMAL_ALLOWED=false
+```
+
+---
+
 # 2026-07-17 FIX｜FORMAL Gate source/config 參數化 precheck
 
 本輪 `PLine｜FIX｜小修正與命名同步` 只做 FORMAL Gate 前的 source/config 正式化參數化 precheck 與必要小修，不部署、不建立 Cloudflare 資源、不設定 secret。

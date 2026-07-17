@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pline.formal-codex-inbox-monitor</string>
+  <key>Disabled</key>
+  <true/>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02/codex-inbox/monitor.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEX_INBOX_MODE</key>
+    <string>kv</string>
+    <key>CODEX_INBOX_KV_NAMESPACE_ID</key>
+    <string>b32de14ccd644b94bd9128abf2b22792</string>
+    <key>CODEX_EXECUTOR_ENVIRONMENT</key>
+    <string>formal</string>
+    <key>CODEX_TASK_NAMESPACE</key>
+    <string>default</string>
+    <key>CODEX_EXECUTOR_STATUS_KEY</key>
+    <string>executor-status:formal:default</string>
+    <key>CODEX_PENDING_QUEUE_KEY</key>
+    <string>queues/pending:formal:default</string>
+    <key>CODEX_WORKER_BASE_URL</key>
+    <string>REPLACE_WITH_FORMAL_WORKER_BASE_URL_AFTER_ROUTE_DECISION</string>
+    <key>PLINE_IDEA_DIR</key>
+    <string>REPLACE_WITH_FORMAL_IDEA_DIR</string>
+    <key>PLINE_IDEA_DELETED_DIR</key>
+    <string>REPLACE_WITH_FORMAL_IDEA_DELETED_DIR</string>
+    <key>CODEX_INBOX_RUNTIME_DIR</key>
+    <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02/codex-inbox-formal-runtime</string>
+    <key>CODEX_TASK_LOG_DIR</key>
+    <string>/tmp/pline-formal-codex-task-logs</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>

@@ -2,6 +2,30 @@
 
 ---
 
+# 2026-07-17 RELEASE｜FORMAL resource creation gate
+
+本輪只做 FORMAL resource creation gate，不做 live cutover。
+
+已完成：
+
+- FORMAL KV：`PLINE_FORMAL_CODEX_INBOX`
+- FORMAL KV id：`b32de14ccd644b94bd9128abf2b22792`
+- FORMAL Worker shell：`pline-v2-0-formal-line-gateway`
+- FORMAL Worker version id：`74970ada-24b7-40ed-a7b4-d5ff0e68a810`
+- `env.formal` KV placeholder 已替換。
+- FORMAL monitor template：`codex-inbox/com.pline.formal-monitor.template.plist`
+
+重要邊界：
+
+- Cloudflare 回報 `No targets deployed`，目前沒有 live route。
+- FORMAL secret list 目前是空的；不能回覆 LINE、不能 push final。
+- monitor template 預設 `Disabled=true`、`RunAtLoad=false`、`KeepAlive=false`，不得直接載入啟動。
+- 未切 LINE webhook，未操作 n8n live，未做 FORMAL LINE 驗收。
+
+下一步只能是 TEST deploy/retest gate 或 FORMAL secret / route / monitor 設定前置 gate，不得直接 FORMAL PASS。
+
+---
+
 # 2026-07-17 FIX｜FORMAL Gate source/config 參數化 precheck
 
 本輪只做 FORMAL Gate 前的 source/config 正式化參數化，不部署、不建立 FORMAL 資源、不設定 secret。

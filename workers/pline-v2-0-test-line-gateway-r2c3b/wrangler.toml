@@ -27,4 +27,4 @@ PLINE_WORKER_NAME = "pline-v2-0-formal-line-gateway"
 
 [[env.formal.kv_namespaces]]
 binding = "CODEX_INBOX"
-id = "REPLACE_WITH_FORMAL_KV_NAMESPACE_ID"
+id = "b32de14ccd644b94bd9128abf2b22792"

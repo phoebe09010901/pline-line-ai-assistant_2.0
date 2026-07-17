@@ -72,6 +72,7 @@ V2.0 / 第一版功能仍是受保護 baseline；V3.3 列表 PASS 也只能作�
 | `PLine_RELEASE_CLOSEOUT_CHECK.md` | referenced | 階段收尾、tag / commit 與 NO GO / live retest pending 上線判定 |
 | `codex-inbox/monitor.js` | active | V3 Codex inbox monitor foundation |
 | `codex-inbox/com.pline.v3-monitor.plist` | active | V3 monitor LaunchAgent 設定 |
+| `codex-inbox/com.pline.formal-monitor.template.plist` | template | FORMAL monitor template；未啟動 |
 | `codex-inbox/pending/.gitkeep` | active | V3 pending queue 目錄保留 |
 | `codex-inbox/processing/.gitkeep` | active | V3 processing queue 目錄保留 |
 | `codex-inbox/completed/.gitkeep` | active | V3 completed queue 目錄保留 |
@@ -79,7 +80,7 @@ V2.0 / 第一版功能仍是受保護 baseline；V3.3 列表 PASS 也只能作�
 | `local-query-api/README.md` | active | local-query-api 查詢服務與資料路徑 env 說明 |
 | `local-query-api/server.js` | active | 日／月／年、搜尋、查看、修改、刪除等查詢服務；支援 `PLINE_QUERY_DATA_DIR` |
 | `workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js` | active | LINE Gateway / Worker 主程式；本機 source `V3.4.2` |
-| `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml` | active | TEST vars 與 FORMAL env template；不含 secret |
+| `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml` | active | TEST vars 與 FORMAL env resource config；FORMAL KV id 已替換，不含 secret |
 | `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json` | active | 已通過的 n8n V2.0 Dropbox baseline 匯出 |
 | `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json` | active | 已通過的 n8n V2.0 baseline 匯出 |
 | `n8n/PLine_V2_0_workflow_skeleton.json` | historical | 2026-07-15 歷史 skeleton，不是目前 baseline |

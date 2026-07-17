@@ -118,6 +118,33 @@ V2.0 LINE -> Worker -> n8n -> TEST Dropbox baseline、V3 receive-only checkpoint
 
 2026-07-17 KV quota / throttling checkpoint 可保存；今日 live LINE retest、列表 final、admin allowlist、多重防護與 FORMAL 仍不允許標 PASS。
 
+## 追加：FORMAL resource creation gate
+
+本輪只建立 FORMAL resource shell，不做 live cutover。
+
+已完成：
+
+- FORMAL KV：`PLINE_FORMAL_CODEX_INBOX`
+- FORMAL KV id：`b32de14ccd644b94bd9128abf2b22792`
+- FORMAL Worker shell：`pline-v2-0-formal-line-gateway`
+- FORMAL Worker version id：`74970ada-24b7-40ed-a7b4-d5ff0e68a810`
+- `env.formal` KV placeholder 已替換
+- FORMAL monitor template 已新增，但未啟動
+
+仍未完成：
+
+- FORMAL secret value
+- route / custom domain
+- LINE webhook cutover
+- n8n formal workflow
+- FORMAL monitor startup
+- FORMAL LINE live validation
+
+```text
+FORMAL_RESOURCE_GATE_STATUS=completed_no_live_cutover
+FORMAL_ALLOWED=false
+```
+
 目前狀態：
 
 ```text

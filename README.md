@@ -106,6 +106,21 @@ LINE
 
 FORMAL 仍需 RELEASE 建立 Worker、KV、secret、monitor 與正式資料路徑後才能測試。
 
+2026-07-17 resource gate 已完成：
+
+- FORMAL KV：`PLINE_FORMAL_CODEX_INBOX`
+- FORMAL Worker shell：`pline-v2-0-formal-line-gateway`
+- FORMAL monitor template：`codex-inbox/com.pline.formal-monitor.template.plist`
+
+仍未完成：
+
+- FORMAL secret value
+- route / custom domain
+- LINE webhook cutover
+- n8n formal workflow
+- FORMAL monitor startup
+- FORMAL LINE live validation
+
 ---
 
 ## 受保護 baseline
