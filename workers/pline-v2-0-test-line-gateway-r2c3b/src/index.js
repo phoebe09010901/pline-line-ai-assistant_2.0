@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.8";
+const WORKER_VERSION = "V3.4.9";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -12,6 +12,8 @@ const EXECUTOR_OFFLINE_AFTER_MS = 600_000;
 const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
 const N8N_AGENT_ACK_TIMEOUT_MS = 5_000;
 const N8N_AGENT_WEBHOOK_TIMEOUT_MS = 25_000;
+const N8N_AGENT_PIPELINE_TIMEOUT_MS = 35_000;
+const LINE_PUSH_TIMEOUT_MS = 10_000;
 const LONG_TASK_HINTS = [
   "修改檔案", "整理專案", "執行程式", "部署", "computer use", "Computer Use",
   "多步驟", "長時間分析", "修正程式", "實作", "開發", "重構",
@@ -122,17 +124,46 @@ function n8nAgentWebhookTimeoutMs(env = {}) {
   return boundedPositiveInteger(env.PLINE_N8N_AGENT_WEBHOOK_TIMEOUT_MS, N8N_AGENT_WEBHOOK_TIMEOUT_MS, 1_000, 60_000);
 }
 
+function n8nAgentPipelineTimeoutMs(env = {}) {
+  return boundedPositiveInteger(env.PLINE_N8N_AGENT_PIPELINE_TIMEOUT_MS, N8N_AGENT_PIPELINE_TIMEOUT_MS, 5_000, 70_000);
+}
+
+function linePushTimeoutMs(env = {}) {
+  return boundedPositiveInteger(env.PLINE_LINE_PUSH_TIMEOUT_MS, LINE_PUSH_TIMEOUT_MS, 1_000, 30_000);
+}
+
 async function fetchWithTimeout(url, init = {}, timeoutMs = 0, label = "fetch") {
   if (!timeoutMs || timeoutMs <= 0) return fetch(url, init);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timeoutId;
+  let didTimeout = false;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+      reject(new Error(`${label}_timeout_after_${timeoutMs}ms`));
+    }, timeoutMs);
+  });
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await Promise.race([fetch(url, { ...init, signal: controller.signal }), timeout]);
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(`${label}_timeout_after_${timeoutMs}ms`);
+    if (didTimeout || controller.signal.aborted) throw new Error(`${label}_timeout_after_${timeoutMs}ms`);
     throw error;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timeoutId);
+  }
+}
+
+async function withTimeout(operation, timeoutMs = 0, label = "operation") {
+  if (!timeoutMs || timeoutMs <= 0) return operation();
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label}_timeout_after_${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(operation), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -717,11 +748,11 @@ async function pushLineText(taskId, text, env, pushType = "final") {
   const pushKey = `push-idempotency/${pushType}/${pushBasis}`;
   const existingPush = pushType === "final" ? await env.CODEX_INBOX.get(pushKey, "json").catch(() => null) : null;
   if (existingPush?.status === "sent") return json({ ok: true, duplicate: true, status: existingPush.http_status || 200 });
-  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+  const response = await fetchWithTimeout("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ to: task.user_id, messages: [{ type: "text", text }] }),
-  });
+  }, linePushTimeoutMs(env), "line_push");
   if (pushType === "final" && response.ok) {
     await env.CODEX_INBOX.put(pushKey, JSON.stringify({
       task_id: task.task_id || taskId,
@@ -751,16 +782,13 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
   const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
   const dispatchStartedAt = task.n8n_dispatch_started_at || taipeiNow();
   task.n8n_dispatch_started_at = dispatchStartedAt;
-  await env.CODEX_INBOX.put(processingKey, JSON.stringify(task)).catch(() => {});
-  await env.CODEX_INBOX.put(executionKey, JSON.stringify({
-    task_id: task.task_id,
-    idempotency_hash: task.idempotency_hash || null,
-    status: "processing",
-    executor_type: "n8n_agent",
-    started_at: dispatchStartedAt,
-    dispatch_started_at: dispatchStartedAt,
-  })).catch(() => {});
   try {
+    const fetchStartedAt = taipeiNow();
+    await markN8nAgentPhase(task, env, "n8n_fetch_started", {
+      n8n_fetch_started_at: fetchStartedAt,
+      n8n_http_status: null,
+      n8n_response_has_final: false,
+    });
     const response = await fetchWithTimeout(webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -788,6 +816,7 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
     task.failed_at = completed ? null : completedAt;
     task.n8n_http_status = response.status;
     task.n8n_response_has_final = Boolean(finalMessage);
+    task.n8n_fetch_completed_at = completedAt;
     task.result_status = completed ? "completed" : "failed";
     task.technical_summary = completed
       ? `Routed to n8n_agent. category=${task.route_category}; http_status=${response.status}; final_message=${finalMessage ? "returned" : "not_returned"}.`
@@ -812,6 +841,12 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
       status: task.status,
       executor_type: "n8n_agent",
       updated_at: completedAt,
+      phase: completed ? "completed" : "failed",
+      dispatch_started_at: task.n8n_dispatch_started_at || null,
+      ack_started_at: task.ack_started_at || null,
+      gateway_ack_at: task.gateway_ack_at || null,
+      n8n_fetch_started_at: task.n8n_fetch_started_at || null,
+      n8n_fetch_completed_at: task.n8n_fetch_completed_at || null,
       n8n_http_status: response.status,
       n8n_response_has_final: Boolean(finalMessage),
     }));
@@ -827,6 +862,7 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
     task.failed_at = failedAt;
     task.result_status = "failed";
     task.error_summary = String(error?.message || error).slice(0, 500);
+    task.n8n_error = task.error_summary;
     task.n8n_http_status = null;
     task.n8n_response_has_final = false;
     task.final_push_status = "dispatch_failed";
@@ -838,6 +874,11 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
       status: "failed",
       executor_type: "n8n_agent",
       updated_at: failedAt,
+      phase: "failed",
+      dispatch_started_at: task.n8n_dispatch_started_at || null,
+      ack_started_at: task.ack_started_at || null,
+      gateway_ack_at: task.gateway_ack_at || null,
+      n8n_fetch_started_at: task.n8n_fetch_started_at || null,
       error_summary: task.error_summary,
     })).catch(() => {});
     await env.CODEX_INBOX.put(`idempotency/${task.idempotency_hash}`, JSON.stringify({
@@ -861,6 +902,9 @@ async function markN8nAgentTaskFailed(task, env = {}, error, stage = "n8n_agent_
   task.result_status = "failed";
   task.error_stage = stage;
   task.error_summary = summary;
+  task.n8n_error = summary;
+  task.n8n_pipeline_phase = "failed";
+  if (!task.gateway_ack_at) task.ack_failed_at = failedAt;
   if (task.n8n_http_status === undefined) task.n8n_http_status = null;
   if (task.n8n_response_has_final === undefined) task.n8n_response_has_final = false;
   if (!task.final_push_status) task.final_push_status = "not_sent_due_to_error";
@@ -872,6 +916,13 @@ async function markN8nAgentTaskFailed(task, env = {}, error, stage = "n8n_agent_
     status: "failed",
     executor_type: "n8n_agent",
     updated_at: failedAt,
+    phase: "failed",
+    dispatch_started_at: task.n8n_dispatch_started_at || null,
+    ack_started_at: task.ack_started_at || null,
+    ack_failed_at: task.ack_failed_at || null,
+    gateway_ack_at: task.gateway_ack_at || null,
+    n8n_fetch_started_at: task.n8n_fetch_started_at || null,
+    n8n_http_status: task.n8n_http_status ?? null,
     error_stage: stage,
     error_summary: summary,
   })).catch(() => {});
@@ -886,12 +937,14 @@ async function markN8nAgentTaskFailed(task, env = {}, error, stage = "n8n_agent_
   }
 }
 
-async function markN8nAgentDispatchStarting(task, env = {}) {
+async function markN8nAgentPhase(task, env = {}, phase = "processing", fields = {}) {
   if (!env.CODEX_INBOX || !task?.task_id) return;
   const dispatchStartedAt = task.n8n_dispatch_started_at || taipeiNow();
   const processingKey = `processing/${task.task_id}.json`;
   const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
   task.n8n_dispatch_started_at = dispatchStartedAt;
+  task.n8n_pipeline_phase = phase;
+  Object.assign(task, fields);
   await env.CODEX_INBOX.put(processingKey, JSON.stringify(task));
   await env.CODEX_INBOX.put(executionKey, JSON.stringify({
     task_id: task.task_id,
@@ -900,7 +953,11 @@ async function markN8nAgentDispatchStarting(task, env = {}) {
     executor_type: "n8n_agent",
     started_at: dispatchStartedAt,
     dispatch_started_at: dispatchStartedAt,
-    phase: "pre_ack",
+    phase,
+    ack_started_at: task.ack_started_at || null,
+    gateway_ack_at: task.gateway_ack_at || null,
+    n8n_fetch_started_at: task.n8n_fetch_started_at || null,
+    n8n_http_status: task.n8n_http_status ?? null,
   }));
 }
 
@@ -952,16 +1009,23 @@ export default {
         } else if (result.n8n_agent) {
           let ackSent = false;
           try {
-            await markN8nAgentDispatchStarting(result.task, env);
-            const ack = await replyToLine(event, env, result.task, {
-              timeoutMs: n8nAgentAckTimeoutMs(env),
-              timeoutLabel: "line_ack",
-            });
-            if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
-            ackSent = true;
-            result.task.gateway_ack_at = ack.sent_at;
-            await env.CODEX_INBOX.put(`processing/${result.task.task_id}.json`, JSON.stringify(result.task)).catch(() => {});
-            await dispatchN8nAgentTask(result.task, env, result.webhook_url);
+            await withTimeout(async () => {
+              const ackStartedAt = taipeiNow();
+              await markN8nAgentPhase(result.task, env, "ack_started", { ack_started_at: ackStartedAt });
+              const ack = await replyToLine(event, env, result.task, {
+                timeoutMs: n8nAgentAckTimeoutMs(env),
+                timeoutLabel: "line_ack",
+              });
+              if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
+              ackSent = true;
+              result.task.gateway_ack_at = ack.sent_at;
+              result.task.ack_http_status = ack.status;
+              await markN8nAgentPhase(result.task, env, "ack_sent", {
+                gateway_ack_at: ack.sent_at,
+                ack_http_status: ack.status,
+              });
+              await dispatchN8nAgentTask(result.task, env, result.webhook_url);
+            }, n8nAgentPipelineTimeoutMs(env), "n8n_agent_pipeline");
           } catch (n8nError) {
             await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
             console.error("n8n_agent_task_failed", {
