@@ -16,7 +16,8 @@ id = "ba842d5662f94e60bfeb4a85e9f0e36c"
 
 [env.formal]
 name = "pline-v2-0-formal-line-gateway"
-workers_dev = false
+workers_dev = true
+preview_urls = false
 
 [env.formal.vars]
 PLINE_ENVIRONMENT = "formal"

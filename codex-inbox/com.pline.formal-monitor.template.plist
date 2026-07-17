@@ -28,11 +28,13 @@
     <key>CODEX_PENDING_QUEUE_KEY</key>
     <string>queues/pending:formal:default</string>
     <key>CODEX_WORKER_BASE_URL</key>
-    <string>REPLACE_WITH_FORMAL_WORKER_BASE_URL_AFTER_ROUTE_DECISION</string>
+    <string>https://pline-v2-0-formal-line-gateway.phy4175.workers.dev</string>
     <key>PLINE_IDEA_DIR</key>
-    <string>REPLACE_WITH_FORMAL_IDEA_DIR</string>
+    <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_FORMAL</string>
     <key>PLINE_IDEA_DELETED_DIR</key>
-    <string>REPLACE_WITH_FORMAL_IDEA_DELETED_DIR</string>
+    <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_FORMAL_已刪除</string>
+    <key>PLINE_QUERY_DATA_DIR</key>
+    <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_FORMAL</string>
     <key>CODEX_INBOX_RUNTIME_DIR</key>
     <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02/codex-inbox-formal-runtime</string>
     <key>CODEX_TASK_LOG_DIR</key>
