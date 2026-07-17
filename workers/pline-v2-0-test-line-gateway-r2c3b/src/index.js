@@ -289,6 +289,24 @@ async function enqueuePendingTask(env = {}, pendingKey) {
   return payload;
 }
 
+async function removePendingTaskFromQueue(env = {}, pendingKey) {
+  if (!env.CODEX_INBOX || !pendingKey) return null;
+  const queueKey = pendingQueueKey(env);
+  const raw = await env.CODEX_INBOX.get(queueKey, "json").catch(() => null);
+  const keys = Array.isArray(raw) ? raw : Array.isArray(raw?.keys) ? raw.keys : null;
+  if (!keys) return null;
+  const queuedKeys = keys.filter((key) => typeof key === "string" && key !== pendingKey);
+  if (queuedKeys.length === keys.length) return raw;
+  const payload = {
+    keys: queuedKeys,
+    updated_at: taipeiNow(),
+    environment: runtimeEnvironment(env),
+    task_namespace: taskNamespace(env),
+  };
+  await env.CODEX_INBOX.put(queueKey, JSON.stringify(payload));
+  return payload;
+}
+
 export async function writeInboxTask(event, env, request = null) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
@@ -391,18 +409,34 @@ export async function writeInboxTask(event, env, request = null) {
     version: WORKER_VERSION,
   };
 
-  await env.CODEX_INBOX.put(seenKey, id);
-  await env.CODEX_INBOX.put(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "pending", created_at: createdAt }));
-  if (operationKey) {
-    await env.CODEX_INBOX.put(operationKey, JSON.stringify({
+  const writtenKeys = [];
+  const putTracked = async (writeKey, value, options) => {
+    writtenKeys.push(writeKey);
+    await env.CODEX_INBOX.put(writeKey, value, options);
+  };
+  try {
+    await putTracked(seenKey, id);
+    await putTracked(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "pending", created_at: createdAt }));
+    if (operationKey) {
+      await putTracked(operationKey, JSON.stringify({
+        task_id: id,
+        status: "processing",
+        operation_type: operation.operation,
+        created_at: createdAt,
+      }), { expirationTtl: OPERATION_FINGERPRINT_TTL_SECONDS });
+    }
+    await putTracked(key, JSON.stringify(task));
+    await enqueuePendingTask(env, key);
+  } catch (error) {
+    await Promise.allSettled(writtenKeys.map((writtenKey) => env.CODEX_INBOX.delete(writtenKey)));
+    await removePendingTaskFromQueue(env, key).catch(() => null);
+    console.error("inbox_task_write_failed_cleaned_up", {
+      idempotency_hash: idempotency.idempotency_hash,
       task_id: id,
-      status: "processing",
-      operation_type: operation.operation,
-      created_at: createdAt,
-    }), { expirationTtl: OPERATION_FINGERPRINT_TTL_SECONDS });
+      summary: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-  await env.CODEX_INBOX.put(key, JSON.stringify(task));
-  await enqueuePendingTask(env, key);
   return { duplicate: false, task };
 }
 
