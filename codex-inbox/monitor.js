@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { listIdeasForPeriod } from "./idea-tools.js";
+import { listIdeasForPeriod, saveIdea } from "./idea-tools.js";
 import { ACCOUNTING_TARGET_FILE, syncAccountingCsv } from "./accounting-tools.js";
 
 const SOURCE_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +34,7 @@ const PENDING_QUEUE_KEY = process.env.CODEX_PENDING_QUEUE_KEY || `queues/pending
 const PENDING_QUEUE_LIMIT = Number(process.env.CODEX_PENDING_QUEUE_LIMIT || 200);
 const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
 const EXECUTOR_INSTANCE_ID = process.env.CODEX_EXECUTOR_INSTANCE_ID || `${EXECUTOR_ID}:${process.pid}`;
-const MONITOR_VERSION = "V3.4";
+const MONITOR_VERSION = "V3.4.1";
 const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 600_000);
 const TASK_LOG_DIR = process.env.CODEX_TASK_LOG_DIR || "/tmp";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
@@ -483,6 +483,52 @@ export async function buildIdeaListUserMessage(task = {}) {
   return message;
 }
 
+function isIdeaSaveTask(task = {}) {
+  return task.operation_type === "idea_save" || /^新增想法|^記一下|^幫我記下|^幫我記|^記下|^保存想法|^備忘/u.test(String(task.original_text || ""));
+}
+
+function ideaSaveText(task = {}) {
+  const target = String(task.operation_target || "").trim();
+  if (target) return target;
+  return String(task.original_text || "")
+    .replace(/^(新增想法|記一下|幫我記下|幫我記|記下|保存想法|備忘)[，,：:\s]*/u, "")
+    .trim();
+}
+
+export async function buildIdeaSaveResult(task = {}) {
+  const text = ideaSaveText(task);
+  if (!text) throw new Error("Missing idea text");
+  const saved = await saveIdea({
+    text,
+    taskId: task.task_id || "",
+    sourceEventId: task.line_event_id || "",
+    sourceMessageId: task.line_message_id || "",
+    sourceUserId: task.source_user_id || task.user_id || "",
+    sourceUserFingerprint: task.source_user_fingerprint || "",
+    idempotencyKey: task.idempotency_key || "",
+    operationFingerprint: task.operation_fingerprint || "",
+  }, DROPBOX_DIR);
+  const savedPath = path.join(saved.dir || DROPBOX_DIR, saved.file);
+  const raw = await fs.readFile(savedPath, "utf8");
+  const parsed = JSON.parse(raw);
+  const verified = parsed.text === text || parsed.original_text === text;
+  if (!verified) throw new Error("Saved idea verification failed");
+  const finalUserMessage = saved.duplicate
+    ? `我剛剛已經記過這個想法了，這次沒有重複新增：${text}`
+    : `我已經幫你記下這個想法了：${text} ✅`;
+  validateFinalUserMessage(finalUserMessage, task);
+  return {
+    technical_summary: [
+      `Direct idea save via idea-tools API. ok=true, action=save, duplicate=${Boolean(saved.duplicate)}, file=${saved.file}.`,
+      `Configured idea dir=${saved.dir || DROPBOX_DIR}. Verified saved file exists and contains expected text.`,
+    ].join(" "),
+    final_user_message: finalUserMessage,
+    progress_stage: null,
+    progress_user_message: null,
+    result_status: "completed",
+  };
+}
+
 export function validateFinalUserMessage(message, task = {}) {
   if (!message) throw new Error("Codex did not provide a valid LINE final message");
   if (message.length > MAX_LINE_MESSAGE_LENGTH) throw new Error("Codex LINE final message is too long");
@@ -756,7 +802,8 @@ async function updateOperationFingerprintRecord(task = {}, status = "completed")
 }
 
 async function executeAndPush(task) {
-  return maybeBuildClarificationResult(task) || executeWithCodex(task);
+  return maybeBuildClarificationResult(task)
+    || (isIdeaSaveTask(task) ? buildIdeaSaveResult(task) : executeWithCodex(task));
 }
 
 function parsePendingQueue(raw) {
@@ -778,6 +825,12 @@ async function queuedPendingKeys() {
 
 async function writePendingQueue(keys = []) {
   const cleanKeys = [...new Set(keys.filter((key) => typeof key === "string" && key.startsWith("pending/")))].slice(-PENDING_QUEUE_LIMIT);
+  if (!cleanKeys.length) {
+    await kvAdapter.delete(PENDING_QUEUE_KEY).catch((error) => {
+      console.error("pending_queue_delete_failed", { summary: error instanceof Error ? error.message : String(error) });
+    });
+    return;
+  }
   await kvAdapter.put(PENDING_QUEUE_KEY, JSON.stringify({
     keys: cleanKeys,
     updated_at: now(),
