@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.5";
+const WORKER_VERSION = "V3.4.6";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -558,7 +558,7 @@ export async function writeN8nAgentTask(event, env, request = null) {
     status: "processing",
     received_at: createdAt,
     task_created_at: createdAt,
-    gateway_ack_at: createdAt,
+    gateway_ack_at: null,
     attempts: 1,
     claimed_at: createdAt,
     claimed_by: "n8n_agent",
@@ -571,16 +571,17 @@ export async function writeN8nAgentTask(event, env, request = null) {
     await env.CODEX_INBOX.put(writeKey, value, options);
   };
   try {
-    await putTracked(key, JSON.stringify(task));
-    await putTracked(seenKey, id);
-    await putTracked(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "processing", executor_type: "n8n_agent", created_at: createdAt }));
     await putTracked(`executions/${idempotency.idempotency_hash}`, JSON.stringify({
       task_id: id,
       idempotency_hash: idempotency.idempotency_hash,
       status: "processing",
       executor_type: "n8n_agent",
       started_at: createdAt,
+      dispatch_started_at: null,
     }));
+    await putTracked(key, JSON.stringify(task));
+    await putTracked(seenKey, id);
+    await putTracked(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "processing", executor_type: "n8n_agent", created_at: createdAt }));
   } catch (error) {
     await Promise.allSettled(writtenKeys.map((writtenKey) => env.CODEX_INBOX.delete(writtenKey)));
     console.error("n8n_agent_task_write_failed_cleaned_up", {
@@ -624,6 +625,7 @@ async function replyToLine(event, env, taskOrText) {
     body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text }] }),
   });
   if (!response.ok) console.error("line_reply_failed", { status: response.status });
+  return { ok: response.ok, status: response.status, sent_at: taipeiNow() };
 }
 
 export async function wakeMonitor(task, env = {}, request = null) {
@@ -813,6 +815,43 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
   }
 }
 
+async function markN8nAgentTaskFailed(task, env = {}, error, stage = "n8n_agent_failed") {
+  if (!env.CODEX_INBOX || !task?.task_id) return;
+  const failedAt = taipeiNow();
+  const processingKey = `processing/${task.task_id}.json`;
+  const failedKey = `failed/${task.task_id}.json`;
+  const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
+  const summary = String(error?.message || error || stage).slice(0, 500);
+  task.status = "failed";
+  task.failed_at = failedAt;
+  task.result_status = "failed";
+  task.error_stage = stage;
+  task.error_summary = summary;
+  if (task.n8n_http_status === undefined) task.n8n_http_status = null;
+  if (task.n8n_response_has_final === undefined) task.n8n_response_has_final = false;
+  if (!task.final_push_status) task.final_push_status = "not_sent_due_to_error";
+  await env.CODEX_INBOX.put(failedKey, JSON.stringify(task)).catch(() => {});
+  await env.CODEX_INBOX.delete(processingKey).catch(() => {});
+  await env.CODEX_INBOX.put(executionKey, JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    status: "failed",
+    executor_type: "n8n_agent",
+    updated_at: failedAt,
+    error_stage: stage,
+    error_summary: summary,
+  })).catch(() => {});
+  if (task.idempotency_hash) {
+    await env.CODEX_INBOX.put(`idempotency/${task.idempotency_hash}`, JSON.stringify({
+      task_id: task.task_id,
+      status: "failed",
+      executor_type: "n8n_agent",
+      updated_at: failedAt,
+      error_stage: stage,
+    })).catch(() => {});
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "GET") {
@@ -859,8 +898,18 @@ export default {
         } else if (result.duplicate && result.ack_user_message && !result.webhook_redelivery) {
           await replyToLine(event, env, result.ack_user_message);
         } else if (result.n8n_agent) {
-          await replyToLine(event, env, result.task);
-          await dispatchN8nAgentTask(result.task, env, result.webhook_url);
+          let ackSent = false;
+          try {
+            const ack = await replyToLine(event, env, result.task);
+            if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
+            ackSent = true;
+            result.task.gateway_ack_at = ack.sent_at;
+            await env.CODEX_INBOX.put(`processing/${result.task.task_id}.json`, JSON.stringify(result.task)).catch(() => {});
+            await dispatchN8nAgentTask(result.task, env, result.webhook_url);
+          } catch (n8nError) {
+            await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
+            if (!ackSent) throw n8nError;
+          }
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
             console.log("monitor_wake_skipped", { reason: result.task.wake_skip_reason || "wake_not_scheduled" });
