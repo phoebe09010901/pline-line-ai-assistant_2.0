@@ -56,17 +56,23 @@ async function testWriteCreatesScheduledPhase() {
   const idempotency = await idempotencyKeyForEvent(event, env);
   const task = await kv.get(`processing/${result.task.task_id}.json`, "json");
   const execution = await kv.get(`executions/${idempotency.idempotency_hash}`, "json");
+  const debug = await kv.get(`pipeline-debug/${idempotency.idempotency_hash}`, "json");
 
   assert.equal(result.n8n_agent, true);
   assert.equal(task.status, "processing");
   assert.equal(task.executor_type, "n8n_agent");
   assert.equal(task.route_category, "accounting_single_record");
   assert.equal(task.n8n_pipeline_phase, "pipeline_started");
+  assert.ok(task.pipeline_schedule_intent_at, "processing task must include pipeline_schedule_intent_at immediately after write");
   assert.ok(task.pipeline_scheduled_at, "processing task must include pipeline_scheduled_at immediately after write");
   assert.ok(task.pipeline_started_at, "processing task must include pipeline_started_at immediately after write");
   assert.equal(execution.phase, "pipeline_started");
+  assert.equal(execution.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
   assert.equal(execution.pipeline_scheduled_at, task.pipeline_scheduled_at);
   assert.equal(execution.pipeline_started_at, task.pipeline_started_at);
+  assert.equal(debug.phase, "task_created");
+  assert.equal(debug.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
+  assert.equal(debug.pipeline_started_at, task.pipeline_started_at);
 }
 
 async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
@@ -120,7 +126,7 @@ async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
     assert.ok(debugAfterSchedule.waituntil_registered_at, "n8n_agent route must write waituntil_registered_at");
     assert.equal(debugAfterSchedule.task_key, `processing/${task.task_id}.json`);
     assert.equal(debugAfterSchedule.execution_key, `executions/${task.idempotency_hash}`);
-    assert.equal(debugAfterSchedule.version, "V3.4.14");
+    assert.equal(debugAfterSchedule.version, "V3.4.15");
     for (let attempt = 0; attempt < 20 && !releaseLineAck; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }

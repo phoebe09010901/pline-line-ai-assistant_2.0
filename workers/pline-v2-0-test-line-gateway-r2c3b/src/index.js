@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.14";
+const WORKER_VERSION = "V3.4.15";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -568,6 +568,7 @@ export async function writeN8nAgentTask(event, env, request = null) {
   const displayId = displayTaskId();
   const createdAt = taipeiNow();
   const dispatchStartedAt = createdAt;
+  const pipelineScheduleIntentAt = createdAt;
   const pipelineScheduledAt = createdAt;
   const pipelineStartedAt = createdAt;
   const auth = resolveRole(event, env);
@@ -625,6 +626,7 @@ export async function writeN8nAgentTask(event, env, request = null) {
     gateway_ack_at: null,
     n8n_dispatch_started_at: dispatchStartedAt,
     n8n_pipeline_phase: "pipeline_started",
+    pipeline_schedule_intent_at: pipelineScheduleIntentAt,
     pipeline_scheduled_at: pipelineScheduledAt,
     pipeline_started_at: pipelineStartedAt,
     attempts: 1,
@@ -647,12 +649,19 @@ export async function writeN8nAgentTask(event, env, request = null) {
       started_at: createdAt,
       dispatch_started_at: dispatchStartedAt,
       phase: "pipeline_started",
+      pipeline_schedule_intent_at: pipelineScheduleIntentAt,
       pipeline_scheduled_at: pipelineScheduledAt,
       pipeline_started_at: pipelineStartedAt,
     }));
     await putTracked(key, JSON.stringify(task));
     await putTracked(seenKey, id);
     await putTracked(idempotencyIndexKey, JSON.stringify({ task_id: id, status: "processing", executor_type: "n8n_agent", created_at: createdAt }));
+    await writeN8nPipelineDebug(task, env, {
+      pipeline_schedule_intent_at: pipelineScheduleIntentAt,
+      pipeline_scheduled_at: pipelineScheduledAt,
+      pipeline_started_at: pipelineStartedAt,
+      phase: "task_created",
+    });
   } catch (error) {
     await Promise.allSettled(writtenKeys.map((writtenKey) => env.CODEX_INBOX.delete(writtenKey)));
     console.error("n8n_agent_task_write_failed_cleaned_up", {
