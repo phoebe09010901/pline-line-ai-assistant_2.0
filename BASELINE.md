@@ -4,6 +4,74 @@
 
 ---
 
+## 2026-07-17 TEST-only V3.4.10 stopped-before-live-smoke baseline note
+
+本輪 `PLine｜DOC｜文件與規格整理` 只記錄「菲比智能客服 測試」最新狀態。阿光 / FORMAL / 正式版 / 舊專案本日未處理；不得列入本輪 baseline。
+
+### 可列入事實
+
+- FIX 已完成 TEST Worker `V3.4.10` source 修補。
+- V3.4.10 source 已 commit / push：`7b1191f fix: schedule test n8n agent pipeline`。
+- TEST Worker 已部署 V3.4.10，deployment version：`1eb5895b-e60a-4ace-949e-56aeb33a2493`。
+- public health 已確認：`V3.4.10 / environment=test / task_namespace=default`。
+- runtime 已確認：`PLINE_N8N_AGENT_ENABLED=true`、`PLINE_N8N_AGENT_WEBHOOK_URL=present`。
+- RELEASE 驗證通過：node check / diff check / Wrangler TEST dry-run 已由 RELEASE 回報通過。
+- 使用者已喊停；控制台已向 RELEASE 發出停止指令。
+- RELEASE 已真正停止，turn completed。
+
+### V3.4.10 source 目的與調整
+
+- 目的：避免 V3.4.9 在 webhook request 內 await 整段 n8n pipeline；真實 LINE / Worker 情境中若 task creation 後 request 流程中斷，pipeline 入口不會開始，只留下 dispatch-start。
+- n8n branch return 前先寫 `pipeline_scheduled_at`。
+- 新增 `runN8nAgentPipeline()` / `scheduleN8nAgentPipeline()`。
+- 有 `ctx.waitUntil` 時背景執行；無 `ctx` 時 fallback bounded pipeline。
+- pipeline 入口寫 `pipeline_started_at`，再寫 `ack_started_at`。
+
+### 不可列入 PASS baseline
+
+- TEST AI Agent PASS。
+- TEST LINE smoke PASS。
+- stuck cleanup completed。
+- precheck completed。
+- FORMAL / 正式版 / 舊專案處理完成。
+- Worker 已部署、source 已修補、release 驗證通過、public health 正常或 `pipeline_scheduled_at` 已寫入，均不可取代真實 TEST LINE smoke。
+
+### 目前固定狀態
+
+```text
+V3.4.10 DEPLOYED
+STOPPED BEFORE LIVE SMOKE
+TEST AI AGENT NOT YET PASS
+FORMAL_ALLOWED=false
+```
+
+### 尚未完成
+
+- stuck cleanup 尚未完成：`processing/task-4dbf67f77db96892d1d0c95641d0cda2.json` 仍存在。
+- precheck 尚未完成。
+- TEST LINE smoke 尚未執行。
+
+### 下一次 baseline 修正條件
+
+1. 確認 V3.4.10 health。
+2. 確認 remote stuck key。
+3. 使用者許可 stuck cleanup。
+4. precheck 完成。
+5. TEST LINE smoke 完成。
+6. 上述全部完成前，不得把 TEST AI Agent 標 PASS。
+
+### AI Agent 規格方向
+
+- n8n AI Agent 包含想法管理：新增、搜尋、列出、計數、修改、刪除。
+- n8n AI Agent 包含 Google Calendar：新增會議 / 行程 / 活動、查詢、修改、取消 / 刪除。
+- 記帳不是獨立 n8n 工具。
+- 單筆帳務內容仍沿用想法紀錄，例如 `記一下：帳務 Cloudflare 56 元` 應走 `idea_create`。
+- 不得因為出現「帳務、收入、支出、金額、元」就誤派 Codex。
+- 只有明確要求整理、統計、加總、結算、製作某段期間帳務總表時，才交由 Codex 做每日帳務總整理。
+- 此為規格方向；尚未完成 live smoke，不得標 AI Agent PASS。
+
+---
+
 ## 2026-07-17 FORMAL Gate source/config precheck note
 
 本輪 `PLine｜FIX｜小修正與命名同步` 完成 FORMAL Gate 前的本機 source/config 參數化，不代表已建立或部署 FORMAL。

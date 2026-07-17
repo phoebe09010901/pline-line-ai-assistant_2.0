@@ -2,6 +2,72 @@
 
 ---
 
+# 2026-07-17 DOC｜TEST-only V3.4.10 stopped-before-live-smoke
+
+本輪只處理「菲比智能客服 測試」文件收尾。阿光 / FORMAL / 正式版 / 舊專案本日未處理；不得寫成完成或 PASS。
+
+## 固定狀態
+
+```text
+V3.4.10 DEPLOYED
+STOPPED BEFORE LIVE SMOKE
+TEST AI AGENT NOT YET PASS
+FORMAL_ALLOWED=false
+```
+
+## 已完成
+
+- FIX 已完成 TEST Worker `V3.4.10` source 修補。
+- V3.4.10 source 已 commit / push：`7b1191f fix: schedule test n8n agent pipeline`。
+- TEST Worker 已部署 V3.4.10，deployment version：`1eb5895b-e60a-4ace-949e-56aeb33a2493`。
+- public health 已確認：`V3.4.10 / environment=test / task_namespace=default`。
+- runtime 已確認：`PLINE_N8N_AGENT_ENABLED=true`、`PLINE_N8N_AGENT_WEBHOOK_URL=present`。
+- RELEASE 驗證通過：node check / diff check / Wrangler TEST dry-run 已由 RELEASE 回報通過。
+- 使用者已喊停，控制台已向 RELEASE 發出停止指令。
+- RELEASE 已真正停止，turn completed。
+
+## V3.4.10 技術目的
+
+- 避免 V3.4.9 在 webhook request 內 await 整段 n8n pipeline。
+- 真實 LINE / Worker 情境中，如果 task creation 後 request 流程中斷，pipeline 入口不會開始，只留下 dispatch-start。
+- V3.4.10 在 n8n branch return 前先寫 `pipeline_scheduled_at`。
+- 新增 `runN8nAgentPipeline()` / `scheduleN8nAgentPipeline()`。
+- 有 `ctx.waitUntil` 時背景執行；無 `ctx` 時 fallback bounded pipeline。
+- pipeline 入口寫 `pipeline_started_at`，再寫 `ack_started_at`。
+
+## 不可誤判
+
+- Worker 已部署不等於 TEST AI Agent PASS。
+- source 已修補不等於 TEST AI Agent PASS。
+- RELEASE 驗證通過不等於 TEST LINE smoke PASS。
+- public health 正常不等於 TEST LINE smoke PASS。
+- `pipeline_scheduled_at` 已寫入不等於 pipeline 已完成 live smoke。
+
+## 尚未完成
+
+- stuck cleanup 尚未完成：`processing/task-4dbf67f77db96892d1d0c95641d0cda2.json` 仍存在。
+- precheck 尚未完成。
+- TEST LINE smoke 尚未執行。
+
+## 下一次接手順序
+
+1. 先確認 V3.4.10 health。
+2. 再確認 remote stuck key：`processing/task-4dbf67f77db96892d1d0c95641d0cda2.json`。
+3. 經使用者許可後，才從 stuck cleanup → precheck → TEST LINE smoke 繼續。
+4. 不得直接 PASS。
+
+## AI Agent 規格方向
+
+- n8n AI Agent 包含想法管理：新增、搜尋、列出、計數、修改、刪除。
+- n8n AI Agent 包含 Google Calendar：新增會議 / 行程 / 活動、查詢、修改、取消 / 刪除。
+- 記帳不是獨立 n8n 工具。
+- 單筆帳務內容仍沿用想法紀錄，例如 `記一下：帳務 Cloudflare 56 元` 應走 `idea_create`。
+- 不得因為出現「帳務、收入、支出、金額、元」就誤派 Codex。
+- 只有明確要求整理、統計、加總、結算、製作某段期間帳務總表時，才交由 Codex 做每日帳務總整理。
+- 此為規格方向；尚未完成 live smoke，不得標 AI Agent PASS。
+
+---
+
 # 2026-07-17 RELEASE｜FORMAL resource creation gate
 
 本輪只做 FORMAL resource creation gate，不做 live cutover。
