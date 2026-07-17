@@ -27,6 +27,8 @@
     <string>queues/pending:test:default</string>
     <key>CODEX_WORKER_BASE_URL</key>
     <string>https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev</string>
+    <key>CODEX_BIN</key>
+    <string>/Users/phoebe/.local/bin/codex</string>
     <key>PLINE_IDEA_DIR</key>
     <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST</string>
     <key>PLINE_IDEA_DELETED_DIR</key>

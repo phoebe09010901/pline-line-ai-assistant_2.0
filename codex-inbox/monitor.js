@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { accessSync, constants as fsConstants, promises as fs } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,14 @@ const MONITOR_VERSION = "V3.4.1";
 const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 600_000);
 const TASK_LOG_DIR = process.env.CODEX_TASK_LOG_DIR || "/tmp";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
+const DEFAULT_CODEX_SEARCH_PATHS = [
+  "/Users/phoebe/.local/bin",
+  "/Applications/ChatGPT.app/Contents/Resources",
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/usr/bin",
+  "/bin",
+];
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
 let localScanLock = false;
@@ -58,6 +66,45 @@ function isAuthorizedWake(request) {
   if (!WAKE_TOKEN) return true;
   const bearer = request.headers.authorization?.replace(/^Bearer\s+/i, "");
   return bearer === WAKE_TOKEN || request.headers["x-codex-wake-token"] === WAKE_TOKEN;
+}
+
+function uniqueItems(items = []) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function isExecutableFile(file) {
+  try {
+    accessSync(file, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function codexSearchPath(env = process.env) {
+  const pathParts = String(env.PATH || "").split(path.delimiter);
+  return uniqueItems([...pathParts, ...DEFAULT_CODEX_SEARCH_PATHS]);
+}
+
+export function resolveCodexExecutable(env = process.env) {
+  const configured = String(env.CODEX_BIN || env.CODEX_EXECUTABLE || "").trim();
+  if (configured) {
+    if (configured.includes("/") || path.isAbsolute(configured)) {
+      const resolved = path.resolve(configured);
+      if (isExecutableFile(resolved)) return resolved;
+      throw new Error(`codex_executable_not_executable:${resolved}`);
+    }
+    for (const dir of codexSearchPath(env)) {
+      const candidate = path.join(dir, configured);
+      if (isExecutableFile(candidate)) return candidate;
+    }
+    throw new Error(`codex_executable_not_found_in_path:${configured}`);
+  }
+  for (const dir of codexSearchPath(env)) {
+    const candidate = path.join(dir, "codex");
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  throw new Error("codex_executable_not_found:set_CODEX_BIN");
 }
 
 export async function triggerScan(scan, source = "manual") {
@@ -122,12 +169,14 @@ export function startWakeServer(scan) {
 
 function runCodex(args, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn("/opt/homebrew/bin/codex", args, {
+    const codexExecutable = resolveCodexExecutable();
+    const child = spawn(codexExecutable, args, {
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+        CODEX_BIN: codexExecutable,
+        PATH: uniqueItems([path.dirname(codexExecutable), ...codexSearchPath(process.env)]).join(path.delimiter),
         HOME: process.env.HOME || "/Users/phoebe",
         CI: "1",
         TERM: process.env.TERM || "dumb",
@@ -982,6 +1031,12 @@ export async function scanKvOnce(handler = executeAndPush) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    console.log("codex_executable_resolved", { path: resolveCodexExecutable() });
+  } catch (error) {
+    console.error("codex_executable_unavailable", { summary: error instanceof Error ? error.message : String(error) });
+    process.exit(1);
+  }
   const scan = process.env.CODEX_INBOX_MODE === "kv" ? scanKvOnce : scanOnce;
   startExecutorHeartbeat();
   startWakeServer(scan);
