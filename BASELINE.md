@@ -4,9 +4,56 @@
 
 ---
 
-## V3.4 mainline baseline note
+## 2026-07-17 closeout baseline note
 
-本輪文件結論以 V3.4 allowlist / owner admin 真實驗收為準，不以舊 V3.3 / V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+本輪文件結論以 2026-07-17 專案收尾狀態為準，不以舊 V3.4 / V3.3 / V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+
+### 目前可沿用的穩定基準
+
+- LINE → 阿光 inbox → 執行 → LINE 第二段回覆的既有閉環已建立。
+- 阿光統一第一人稱與自然回覆規格仍是目前對外訊息基準。
+- V3.4 owner allowlist 修正歷史已完成：owner 可走 `admin / allow_admin`，非 admin deny 歷史已完成。
+- V3.3 offline queued、monitor recovery、recovery progress push、final push 與 duplicate=0 有歷史驗收。
+
+### 目前不可列為穩定基準
+
+- `列出本月想法` 今日 live 只收到 ACK、沒有第二段 final；需重新驗收 / 目前不穩定。
+- `請通通幫我列出來` 曾修正並有一次 PASS，但後續整體想法列表 / 列本月仍存在 live 問題，不得整體標 PASS。
+- 非 admin 帳號可觸發私人想法操作的權限問題尚未修正。
+- 同一內容重複回覆、重複執行及重複產生 JSON 的問題尚未全鏈路修正。
+- wake 真實 claim 仍可能落回 fallback poll，不得標為即時 wake PASS。
+- KV quota reset 後的真實 LINE 重測尚未執行，不得標 PASS。
+- 正式 LINE、正式 Cloudflare、n8n、FORMAL、舊專案皆未切換。
+
+### KV quota / throttling checkpoint
+
+- checkpoint tag：`checkpoint-2026-07-17-kv-quota-throttle`
+- tag 指向 commit：`79baab0e5fc639b771fdaa7d3f07984f400d036f`
+- root cause：Cloudflare KV put 回 `code:10048 your account has reached the free usage limit for this operation for today`
+- 已 release heartbeat/status throttling，避免 idle monitor 燒 KV writes
+- Worker version：`adbbb420-f203-4edd-88d4-6a9236865d87`
+- 真實 LINE 重測尚待 KV write quota reset 後執行
+- queue enqueue / heartbeat / 來源澄清於 quota reset 後仍需 TEST
+
+### Admin allowlist baseline caveat
+
+- LINE Developers 兩位 Admin 不會自動等於阿光管理者。
+- 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
+- 多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
+- 多 admin allowlist 尚未更新 secret；不得標 PASS。
+
+### 明日 baseline 修正條件
+
+1. admin allowlist Gate PASS。
+2. 同一 event / task / execution / JSON / push 全鏈路防重複 PASS。
+3. 非 admin 與 admin 真實 LINE 驗收 PASS。
+4. 想法列表第二段 final PASS。
+5. KV quota reset 後 queue enqueue / heartbeat / 來源澄清 PASS。
+
+---
+
+## V3.4 history baseline note
 
 ### V3.4 allowlist baseline
 

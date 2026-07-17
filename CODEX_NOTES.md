@@ -8,7 +8,7 @@
 
 先讓功能真正跑通，再增加功能。
 
-本輪 V3 文件結論以 V3.4 allowlist / owner admin 真實驗收為準，不以舊 V3.3 / V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
+本輪 V3 文件結論以 2026-07-17 專案收尾狀態為準，不以舊 V3.4 / V3.3 / V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
 
 目前階段採用：
 
@@ -18,7 +18,80 @@
 
 ---
 
-# V3.4 mainline｜allowlist owner admin 修正
+# 2026-07-17 closeout｜狀態整理與明日主線
+
+## 收尾證據與 Git 狀態
+
+- branch：`v3/codex-line-inbox`
+- checkpoint tag：`checkpoint-2026-07-17-kv-quota-throttle`
+- tag 指向 commit：`79baab0e5fc639b771fdaa7d3f07984f400d036f`
+- tag 語意：Cloudflare KV quota root cause；heartbeat/status throttling deployed；LINE retest pending after quota reset
+- RELEASE thread id：`019f6941-4792-7822-8a10-85208aaea800`
+- latest RELEASE turn id：`019f6d01-1aa6-7db3-851d-70e998a456a7`
+- RELEASE 未修改 dirty 檔、未部署、未重啟
+
+## 今日技術結論
+
+- LINE → 阿光 inbox → 執行 → LINE 第二段回覆的既有閉環已建立，但今日不宣稱所有想法功能完全穩定。
+- `列出本月想法` 今日 live 問題：只收到 ACK、沒有第二段 final；需重新驗收 / 目前不穩定。
+- V3.3 online list 曾 PASS，不能覆蓋今日 live 問題。
+- `請通通幫我列出來` 曾修正並有一次 PASS，但後續整體想法列表 / 列本月仍存在 live 問題，不得整體標 PASS。
+- Cloudflare KV write quota root cause 已定位：KV put 回 `code:10048 your account has reached the free usage limit for this operation for today`。
+- heartbeat/status throttling 已 release，commit：`79baab0e5fc639b771fdaa7d3f07984f400d036f`，Worker version：`adbbb420-f203-4edd-88d4-6a9236865d87`。
+- 真實 LINE 重測尚待 KV write quota reset 後執行；不得標 PASS。
+- queue enqueue / heartbeat / 來源澄清於 quota reset 後仍需 TEST。
+- wake 真實 claim 仍可能落回 fallback poll；不得把 wake 即時 claim 說成 PASS。
+
+## 權限與重複防護注意
+
+- V3.4 allowlist owner 修正歷史已完成，但 LINE Developers 兩位 Admin 不會自動等於阿光管理者。
+- 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
+- 多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
+- 多 admin allowlist 尚未更新 secret；不得標 PASS。
+- 非 admin 帳號可觸發私人想法操作的權限問題仍需修正。
+- 同一內容重複回覆、重複執行及重複產生 JSON 的問題仍需全鏈路修正，不得標 PASS。
+
+## 想法功能回歸狀態
+
+- 想法新增 / 搜尋 / 修改 / 刪除有歷史驗收，但今日需在權限與重複防護修正後回歸。
+- 想法列表目前不穩定：V3.3 曾有 online PASS，今日 live 出現 ACK-only。
+- 想法計數 V3.4 owner/admin count final 曾 PASS，仍需和 admin allowlist Gate 一起回歸。
+
+## 阿光對外訊息規格
+
+- LINE 對菲比顯示訊息使用第一人稱「我」。
+- 一般對外訊息不得顯示 Codex / monitor / Worker / Gateway / task_id / PID / stdout / stderr / local path。
+- 技術紀錄可以使用 Codex / monitor / Worker / Gateway 等名稱。
+
+## 後續規劃，尚未實作
+
+- 多圖片 / 多檔案附件功能暫緩，不納入今日開發。
+- n8n AI Agent 架構只列為後續規劃，不得寫成已完成。
+
+```text
+LINE
+├─ n8n AI Agent
+│  ├─ 想法
+│  ├─ 記帳
+│  └─ 日曆
+└─ Codex
+   ├─ 整理本機檔案
+   ├─ 寄信並夾帶本機附件
+   └─ 傳 LINE 並夾帶本機附件
+```
+
+## 明日優先順序
+
+1. 完成 admin allowlist Gate。
+2. 修正同一 event / task / execution / JSON / push 的全鏈路防重複。
+3. 完成非 admin 與 admin 真實 LINE 驗收。
+4. 修正想法列表只 ACK、沒有第二段的問題。
+5. 以上安全問題 PASS 後，再規劃 n8n AI Agent：想法、記帳、Google Calendar。
+
+---
+
+# V3.4 history｜allowlist owner admin 修正
 
 ## V3.4 allowlist / owner admin 修正
 
