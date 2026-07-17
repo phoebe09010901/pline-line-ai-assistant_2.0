@@ -106,6 +106,55 @@ async function testDebugSeedCannotBlockTaskCreation() {
   assert.equal(execution.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
 }
 
+async function testWriteWithCtxSchedulesBeforeReturn() {
+  const kv = new MemoryKV();
+  const env = buildEnv(kv);
+  const waitUntilPromises = [];
+  let releaseLineAck;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes("/v2/bot/message/reply")) {
+      return new Promise((resolve) => {
+        releaseLineAck = () => resolve(new Response("{}", { status: 200 }));
+      });
+    }
+    if (target.includes("n8n.example.test")) {
+      return new Response(JSON.stringify({ final_user_message: "我記好了。" }), { status: 202 });
+    }
+    if (target.includes("/v2/bot/message/push")) {
+      return new Response("{}", { status: 200 });
+    }
+    throw new Error(`unexpected_fetch:${target}`);
+  };
+
+  try {
+    const result = await writeN8nAgentTask(
+      buildEvent({ webhookEventId: "evt-write-ctx-001" }),
+      env,
+      new Request("https://worker.example.test/callback", { method: "POST" }),
+      { waitUntil(promise) { waitUntilPromises.push(promise); } },
+    );
+    const task = await kv.get(`processing/${result.task.task_id}.json`, "json");
+    const execution = await kv.get(`executions/${task.idempotency_hash}`, "json");
+
+    assert.equal(result.n8n_agent_scheduled_in_write, true);
+    assert.ok(task.schedule_handler_entry_at, "writeN8nAgentTask with ctx must enter schedule handler before return");
+    assert.ok(task.waituntil_call_at, "writeN8nAgentTask with ctx must write waituntil_call_at before return");
+    assert.ok(task.waituntil_registered_at, "writeN8nAgentTask with ctx must write waituntil_registered_at before return");
+    assert.equal(execution.schedule_handler_entry_at, task.schedule_handler_entry_at);
+    assert.equal(execution.waituntil_call_at, task.waituntil_call_at);
+    assert.equal(execution.waituntil_registered_at, task.waituntil_registered_at);
+
+    for (let attempt = 0; attempt < 20 && !releaseLineAck; attempt += 1) await nextTick();
+    assert.equal(typeof releaseLineAck, "function");
+    releaseLineAck();
+    await Promise.all(waitUntilPromises);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
   const kv = new MemoryKV();
   const env = buildEnv(kv);
@@ -164,7 +213,7 @@ async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
     const taskAfterEntry = await kv.get(`processing/${task.task_id}.json`, "json");
     const debugAfterEntry = await kv.get(debugKey, "json");
     assert.ok(taskAfterEntry.pipeline_entry_at, "n8n_agent pipeline must write pipeline_entry_at into task");
-    assert.equal(debugAfterEntry.version, "V3.4.16");
+    assert.equal(debugAfterEntry.version, "V3.4.17");
     assert.ok(debugAfterEntry.pipeline_entry_at, "n8n_agent pipeline must write independent pipeline_entry_at debug key");
     const debugJson = JSON.stringify(debugAfterEntry);
     assert.equal(debugJson.includes("test-token"), false);
@@ -207,6 +256,7 @@ async function testWaitUntilErrorDiagnosticIsSanitized() {
 
 await testWriteCreatesScheduledPhase();
 await testDebugSeedCannotBlockTaskCreation();
+await testWriteWithCtxSchedulesBeforeReturn();
 await testLinePostSchedulesBeforeBackgroundAckCompletes();
 await testWaitUntilErrorDiagnosticIsSanitized();
 console.log("n8n-agent-schedule.test.mjs: PASS");

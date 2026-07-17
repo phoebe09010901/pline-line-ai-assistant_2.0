@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.16";
+const WORKER_VERSION = "V3.4.17";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -555,7 +555,7 @@ export async function writeInboxTask(event, env, request = null) {
   return { duplicate: false, task };
 }
 
-export async function writeN8nAgentTask(event, env, request = null) {
+export async function writeN8nAgentTask(event, env, request = null, ctx = null) {
   const route = routeDecisionForEvent(event, env);
   if (route.executor !== "n8n_agent") return writeInboxTask(event, env, request);
   const webhookUrl = n8nAgentWebhookUrl(env);
@@ -671,7 +671,12 @@ export async function writeN8nAgentTask(event, env, request = null) {
     });
     throw error;
   }
-  return { duplicate: false, n8n_agent: true, task, webhook_url: webhookUrl };
+  const result = { duplicate: false, n8n_agent: true, task, webhook_url: webhookUrl };
+  if (ctx) {
+    result.n8n_agent_schedule = await scheduleN8nAgentPipeline(event, result, env, ctx);
+    result.n8n_agent_scheduled_in_write = true;
+  }
+  return result;
 }
 
 async function recordAuthEvent(event, env, auth, idempotency) {
@@ -1216,14 +1221,16 @@ export default {
           continue;
         }
         const result = routeDecisionForEvent(event, env).executor === "n8n_agent"
-          ? await writeN8nAgentTask(event, env, request)
+          ? await writeN8nAgentTask(event, env, request, ctx)
           : await writeInboxTask(event, env, request);
         if (result.duplicate_operation && result.ack_user_message) {
           await replyToLine(event, env, result.ack_user_message);
         } else if (result.duplicate && result.ack_user_message && !result.webhook_redelivery) {
           await replyToLine(event, env, result.ack_user_message);
         } else if (result.n8n_agent) {
-          await scheduleN8nAgentPipeline(event, result, env, ctx);
+          if (!result.n8n_agent_scheduled_in_write) {
+            await scheduleN8nAgentPipeline(event, result, env, ctx);
+          }
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
             console.log("monitor_wake_skipped", { reason: result.task.wake_skip_reason || "wake_not_scheduled" });
