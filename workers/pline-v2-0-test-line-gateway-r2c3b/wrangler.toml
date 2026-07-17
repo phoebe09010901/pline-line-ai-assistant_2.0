@@ -9,6 +9,7 @@ CODEX_TASK_NAMESPACE = "default"
 CODEX_EXECUTOR_STATUS_KEY = "executor-status:test:default"
 CODEX_PENDING_QUEUE_KEY = "queues/pending:test:default"
 PLINE_WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b"
+PLINE_N8N_AGENT_ENABLED = "false"
 
 [[kv_namespaces]]
 binding = "CODEX_INBOX"
