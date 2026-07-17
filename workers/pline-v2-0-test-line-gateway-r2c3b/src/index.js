@@ -4,12 +4,14 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.6";
+const WORKER_VERSION = "V3.4.7";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
 const EXECUTOR_OFFLINE_AFTER_MS = 600_000;
 const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
+const N8N_AGENT_ACK_TIMEOUT_MS = 5_000;
+const N8N_AGENT_WEBHOOK_TIMEOUT_MS = 25_000;
 const LONG_TASK_HINTS = [
   "修改檔案", "整理專案", "執行程式", "部署", "computer use", "Computer Use",
   "多步驟", "長時間分析", "修正程式", "實作", "開發", "重構",
@@ -104,6 +106,34 @@ function workerName(env = {}) {
 
 function truthy(value) {
   return /^(1|true|yes|on)$/i.test(String(value || "").trim());
+}
+
+function boundedPositiveInteger(value, fallback, minimum, maximum) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.trunc(parsed), minimum), maximum);
+}
+
+function n8nAgentAckTimeoutMs(env = {}) {
+  return boundedPositiveInteger(env.PLINE_N8N_AGENT_ACK_TIMEOUT_MS, N8N_AGENT_ACK_TIMEOUT_MS, 1_000, 15_000);
+}
+
+function n8nAgentWebhookTimeoutMs(env = {}) {
+  return boundedPositiveInteger(env.PLINE_N8N_AGENT_WEBHOOK_TIMEOUT_MS, N8N_AGENT_WEBHOOK_TIMEOUT_MS, 1_000, 60_000);
+}
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = 0, label = "fetch") {
+  if (!timeoutMs || timeoutMs <= 0) return fetch(url, init);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`${label}_timeout_after_${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function n8nAgentEnabled(env = {}) {
@@ -614,16 +644,16 @@ async function recordAuthEvent(event, env, auth, idempotency) {
   }), { expirationTtl: 60 * 60 * 24 * 30 });
 }
 
-async function replyToLine(event, env, taskOrText) {
+async function replyToLine(event, env, taskOrText, options = {}) {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN) throw new Error("LINE_CHANNEL_ACCESS_TOKEN binding is missing");
   const text = typeof taskOrText === "string"
     ? taskOrText
     : taskOrText?.ack_user_message || ackUserMessage(event.message.text, taskOrText?.execution_mode, taskOrText?.display_task_id);
-  const response = await fetch(LINE_REPLY_API_URL, {
+  const response = await fetchWithTimeout(LINE_REPLY_API_URL, {
     method: "POST",
     headers: { authorization: `Bearer ${env.LINE_CHANNEL_ACCESS_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ replyToken: event.replyToken, messages: [{ type: "text", text }] }),
-  });
+  }, options.timeoutMs || 0, options.timeoutLabel || "line_reply");
   if (!response.ok) console.error("line_reply_failed", { status: response.status });
   return { ok: response.ok, status: response.status, sent_at: taipeiNow() };
 }
@@ -716,7 +746,7 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
   const completedKey = `completed/${task.task_id}.json`;
   const failedKey = `failed/${task.task_id}.json`;
   const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
-  const dispatchStartedAt = taipeiNow();
+  const dispatchStartedAt = task.n8n_dispatch_started_at || taipeiNow();
   task.n8n_dispatch_started_at = dispatchStartedAt;
   await env.CODEX_INBOX.put(processingKey, JSON.stringify(task)).catch(() => {});
   await env.CODEX_INBOX.put(executionKey, JSON.stringify({
@@ -725,9 +755,10 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
     status: "processing",
     executor_type: "n8n_agent",
     started_at: dispatchStartedAt,
+    dispatch_started_at: dispatchStartedAt,
   })).catch(() => {});
   try {
-    const response = await fetch(webhookUrl, {
+    const response = await fetchWithTimeout(webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -742,7 +773,7 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
         environment: task.environment,
         task_namespace: task.task_namespace,
       }),
-    });
+    }, n8nAgentWebhookTimeoutMs(env), "n8n_agent_webhook");
     const responseText = await response.text();
     let responseBody = null;
     try { responseBody = responseText ? JSON.parse(responseText) : null; } catch { responseBody = null; }
@@ -852,6 +883,24 @@ async function markN8nAgentTaskFailed(task, env = {}, error, stage = "n8n_agent_
   }
 }
 
+async function markN8nAgentDispatchStarting(task, env = {}) {
+  if (!env.CODEX_INBOX || !task?.task_id) return;
+  const dispatchStartedAt = task.n8n_dispatch_started_at || taipeiNow();
+  const processingKey = `processing/${task.task_id}.json`;
+  const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
+  task.n8n_dispatch_started_at = dispatchStartedAt;
+  await env.CODEX_INBOX.put(processingKey, JSON.stringify(task));
+  await env.CODEX_INBOX.put(executionKey, JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    status: "processing",
+    executor_type: "n8n_agent",
+    started_at: dispatchStartedAt,
+    dispatch_started_at: dispatchStartedAt,
+    phase: "pre_ack",
+  }));
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "GET") {
@@ -900,7 +949,11 @@ export default {
         } else if (result.n8n_agent) {
           let ackSent = false;
           try {
-            const ack = await replyToLine(event, env, result.task);
+            await markN8nAgentDispatchStarting(result.task, env);
+            const ack = await replyToLine(event, env, result.task, {
+              timeoutMs: n8nAgentAckTimeoutMs(env),
+              timeoutLabel: "line_ack",
+            });
             if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
             ackSent = true;
             result.task.gateway_ack_at = ack.sent_at;
@@ -908,7 +961,11 @@ export default {
             await dispatchN8nAgentTask(result.task, env, result.webhook_url);
           } catch (n8nError) {
             await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
-            if (!ackSent) throw n8nError;
+            console.error("n8n_agent_task_failed", {
+              stage: ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack",
+              task_id: result.task.task_id,
+              summary: n8nError instanceof Error ? n8nError.message : String(n8nError),
+            });
           }
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
