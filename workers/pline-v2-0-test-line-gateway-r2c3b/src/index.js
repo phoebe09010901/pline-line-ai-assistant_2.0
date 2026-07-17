@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.12";
+const WORKER_VERSION = "V3.4.13";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -569,6 +569,7 @@ export async function writeN8nAgentTask(event, env, request = null) {
   const createdAt = taipeiNow();
   const dispatchStartedAt = createdAt;
   const pipelineScheduledAt = createdAt;
+  const pipelineStartedAt = createdAt;
   const auth = resolveRole(event, env);
   const key = `processing/${id}.json`;
   const seenKey = `events/${idempotency.idempotency_hash}`;
@@ -623,8 +624,9 @@ export async function writeN8nAgentTask(event, env, request = null) {
     task_created_at: createdAt,
     gateway_ack_at: null,
     n8n_dispatch_started_at: dispatchStartedAt,
-    n8n_pipeline_phase: "pipeline_scheduled",
+    n8n_pipeline_phase: "pipeline_started",
     pipeline_scheduled_at: pipelineScheduledAt,
+    pipeline_started_at: pipelineStartedAt,
     attempts: 1,
     claimed_at: createdAt,
     claimed_by: "n8n_agent",
@@ -644,8 +646,9 @@ export async function writeN8nAgentTask(event, env, request = null) {
       executor_type: "n8n_agent",
       started_at: createdAt,
       dispatch_started_at: dispatchStartedAt,
-      phase: "pipeline_scheduled",
+      phase: "pipeline_started",
       pipeline_scheduled_at: pipelineScheduledAt,
+      pipeline_started_at: pipelineStartedAt,
     }));
     await putTracked(key, JSON.stringify(task));
     await putTracked(seenKey, id);

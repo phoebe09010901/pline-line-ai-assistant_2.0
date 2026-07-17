@@ -61,10 +61,12 @@ async function testWriteCreatesScheduledPhase() {
   assert.equal(task.status, "processing");
   assert.equal(task.executor_type, "n8n_agent");
   assert.equal(task.route_category, "accounting_single_record");
-  assert.equal(task.n8n_pipeline_phase, "pipeline_scheduled");
+  assert.equal(task.n8n_pipeline_phase, "pipeline_started");
   assert.ok(task.pipeline_scheduled_at, "processing task must include pipeline_scheduled_at immediately after write");
-  assert.equal(execution.phase, "pipeline_scheduled");
+  assert.ok(task.pipeline_started_at, "processing task must include pipeline_started_at immediately after write");
+  assert.equal(execution.phase, "pipeline_started");
   assert.equal(execution.pipeline_scheduled_at, task.pipeline_scheduled_at);
+  assert.equal(execution.pipeline_started_at, task.pipeline_started_at);
 }
 
 async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
