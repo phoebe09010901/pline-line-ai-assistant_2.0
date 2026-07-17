@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.13";
+const WORKER_VERSION = "V3.4.14";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -980,9 +980,62 @@ async function markN8nAgentPhase(task, env = {}, phase = "processing", fields = 
   }));
 }
 
+function sanitizeDiagnosticError(error) {
+  let summary = String(error?.message || error || "unknown_error").slice(0, 500);
+  summary = summary
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,})\b/g, "[redacted_secret]")
+    .replace(/\bU[a-fA-F0-9]{20,}\b/g, "[redacted_user_id]")
+    .replace(/([?&](?:access_token|token|secret|key|authorization)=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/((?:access_token|token|secret|key|authorization)\s*[:=]\s*)[^\s,;}]+/gi, "$1[redacted]");
+  return {
+    name: typeof error?.name === "string" ? error.name.slice(0, 80) : "Error",
+    message: summary,
+  };
+}
+
+function n8nPipelineDebugKey(task = {}) {
+  return `pipeline-debug/${task.idempotency_hash || task.task_id || "unknown"}`;
+}
+
+async function writeN8nPipelineDebug(task, env = {}, fields = {}) {
+  if (!env.CODEX_INBOX || !task?.task_id) return;
+  const key = n8nPipelineDebugKey(task);
+  const updatedAt = taipeiNow();
+  const base = {
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    line_event_id: task.line_event_id || null,
+    line_message_id: task.line_message_id || null,
+    route_category: task.route_category || null,
+    executor_type: "n8n_agent",
+    task_key: `processing/${task.task_id}.json`,
+    execution_key: `executions/${task.idempotency_hash || task.task_id}`,
+    version: WORKER_VERSION,
+    environment: runtimeEnvironment(env),
+    task_namespace: taskNamespace(env),
+  };
+  try {
+    const existing = await env.CODEX_INBOX.get(key, "json").catch(() => null);
+    await env.CODEX_INBOX.put(key, JSON.stringify({
+      ...base,
+      ...(existing && typeof existing === "object" ? existing : {}),
+      ...fields,
+      ...base,
+      updated_at: updatedAt,
+    }));
+  } catch (error) {
+    console.error("n8n_pipeline_debug_write_failed", sanitizeDiagnosticError(error));
+  }
+}
+
 async function runN8nAgentPipeline(event, result, env = {}) {
   let ackSent = false;
   try {
+    await writeN8nPipelineDebug(result.task, env, {
+      pipeline_entry_at: taipeiNow(),
+      phase: "pipeline_entry",
+    });
     await withTimeout(async () => {
       if (!result.task.pipeline_started_at) {
         const pipelineStartedAt = taipeiNow();
@@ -1005,6 +1058,10 @@ async function runN8nAgentPipeline(event, result, env = {}) {
       await dispatchN8nAgentTask(result.task, env, result.webhook_url);
     }, n8nAgentPipelineTimeoutMs(env), "n8n_agent_pipeline");
   } catch (n8nError) {
+    await writeN8nPipelineDebug(result.task, env, {
+      pipeline_entry_error: sanitizeDiagnosticError(n8nError),
+      phase: ackSent ? "pipeline_error_after_ack" : "pipeline_error_before_ack",
+    });
     await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
     console.error("n8n_agent_task_failed", {
       stage: ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack",
@@ -1016,6 +1073,13 @@ async function runN8nAgentPipeline(event, result, env = {}) {
 
 async function scheduleN8nAgentPipeline(event, result, env = {}, ctx) {
   const scheduledAt = result.task.pipeline_scheduled_at || taipeiNow();
+  await writeN8nPipelineDebug(result.task, env, {
+    pipeline_schedule_intent_at: taipeiNow(),
+    pipeline_scheduled_at: scheduledAt,
+    pipeline_schedule_error: null,
+    pipeline_entry_error: null,
+    phase: "schedule_intent",
+  });
   if (!result.task.pipeline_scheduled_at) {
     await markN8nAgentPhase(result.task, env, "pipeline_scheduled", { pipeline_scheduled_at: scheduledAt });
   }
@@ -1023,10 +1087,26 @@ async function scheduleN8nAgentPipeline(event, result, env = {}, ctx) {
     await markN8nAgentPhase(result.task, env, "pipeline_started", { pipeline_started_at: taipeiNow() });
   }
   if (hasWaitUntil(ctx)) {
+    let startPipeline;
+    const startGate = new Promise((resolve) => { startPipeline = resolve; });
     try {
-      ctx.waitUntil(runN8nAgentPipeline(event, result, env));
+      await writeN8nPipelineDebug(result.task, env, {
+        waituntil_call_at: taipeiNow(),
+        phase: "waituntil_call",
+      });
+      const pipelinePromise = startGate.then(() => runN8nAgentPipeline(event, result, env));
+      ctx.waitUntil(pipelinePromise);
+      await writeN8nPipelineDebug(result.task, env, {
+        waituntil_registered_at: taipeiNow(),
+        phase: "waituntil_registered",
+      });
+      startPipeline();
       return { scheduled: true, mode: "wait_until", scheduled_at: scheduledAt };
     } catch (error) {
+      await writeN8nPipelineDebug(result.task, env, {
+        pipeline_schedule_error: sanitizeDiagnosticError(error),
+        phase: "waituntil_failed",
+      });
       await markN8nAgentTaskFailed(result.task, env, error, "n8n_agent_schedule_failed");
       return { scheduled: false, mode: "wait_until_failed", scheduled_at: scheduledAt };
     }
