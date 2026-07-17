@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.9";
+const WORKER_VERSION = "V3.4.10";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -732,6 +732,10 @@ function wakeMonitorSoon(task, env = {}, ctx, request = null) {
   else void wake;
 }
 
+function hasWaitUntil(ctx) {
+  return typeof ctx?.waitUntil === "function";
+}
+
 function taskCreationFailedReply() {
   return "我目前暫時無法把這則訊息排進處理佇列，這次還沒有開始處理。請你稍後再傳一次。";
 }
@@ -954,11 +958,61 @@ async function markN8nAgentPhase(task, env = {}, phase = "processing", fields = 
     started_at: dispatchStartedAt,
     dispatch_started_at: dispatchStartedAt,
     phase,
+    pipeline_scheduled_at: task.pipeline_scheduled_at || null,
+    pipeline_started_at: task.pipeline_started_at || null,
     ack_started_at: task.ack_started_at || null,
     gateway_ack_at: task.gateway_ack_at || null,
     n8n_fetch_started_at: task.n8n_fetch_started_at || null,
     n8n_http_status: task.n8n_http_status ?? null,
   }));
+}
+
+async function runN8nAgentPipeline(event, result, env = {}) {
+  let ackSent = false;
+  try {
+    await withTimeout(async () => {
+      const pipelineStartedAt = taipeiNow();
+      await markN8nAgentPhase(result.task, env, "pipeline_started", { pipeline_started_at: pipelineStartedAt });
+      const ackStartedAt = taipeiNow();
+      await markN8nAgentPhase(result.task, env, "ack_started", { ack_started_at: ackStartedAt });
+      const ack = await replyToLine(event, env, result.task, {
+        timeoutMs: n8nAgentAckTimeoutMs(env),
+        timeoutLabel: "line_ack",
+      });
+      if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
+      ackSent = true;
+      result.task.gateway_ack_at = ack.sent_at;
+      result.task.ack_http_status = ack.status;
+      await markN8nAgentPhase(result.task, env, "ack_sent", {
+        gateway_ack_at: ack.sent_at,
+        ack_http_status: ack.status,
+      });
+      await dispatchN8nAgentTask(result.task, env, result.webhook_url);
+    }, n8nAgentPipelineTimeoutMs(env), "n8n_agent_pipeline");
+  } catch (n8nError) {
+    await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
+    console.error("n8n_agent_task_failed", {
+      stage: ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack",
+      task_id: result.task.task_id,
+      summary: n8nError instanceof Error ? n8nError.message : String(n8nError),
+    });
+  }
+}
+
+async function scheduleN8nAgentPipeline(event, result, env = {}, ctx) {
+  const scheduledAt = taipeiNow();
+  await markN8nAgentPhase(result.task, env, "pipeline_scheduled", { pipeline_scheduled_at: scheduledAt });
+  if (hasWaitUntil(ctx)) {
+    try {
+      ctx.waitUntil(runN8nAgentPipeline(event, result, env));
+      return { scheduled: true, mode: "wait_until", scheduled_at: scheduledAt };
+    } catch (error) {
+      await markN8nAgentTaskFailed(result.task, env, error, "n8n_agent_schedule_failed");
+      return { scheduled: false, mode: "wait_until_failed", scheduled_at: scheduledAt };
+    }
+  }
+  await runN8nAgentPipeline(event, result, env);
+  return { scheduled: false, mode: "awaited_no_wait_until", scheduled_at: scheduledAt };
 }
 
 export default {
@@ -1007,33 +1061,7 @@ export default {
         } else if (result.duplicate && result.ack_user_message && !result.webhook_redelivery) {
           await replyToLine(event, env, result.ack_user_message);
         } else if (result.n8n_agent) {
-          let ackSent = false;
-          try {
-            await withTimeout(async () => {
-              const ackStartedAt = taipeiNow();
-              await markN8nAgentPhase(result.task, env, "ack_started", { ack_started_at: ackStartedAt });
-              const ack = await replyToLine(event, env, result.task, {
-                timeoutMs: n8nAgentAckTimeoutMs(env),
-                timeoutLabel: "line_ack",
-              });
-              if (!ack.ok) throw new Error(`line_ack_failed_status_${ack.status}`);
-              ackSent = true;
-              result.task.gateway_ack_at = ack.sent_at;
-              result.task.ack_http_status = ack.status;
-              await markN8nAgentPhase(result.task, env, "ack_sent", {
-                gateway_ack_at: ack.sent_at,
-                ack_http_status: ack.status,
-              });
-              await dispatchN8nAgentTask(result.task, env, result.webhook_url);
-            }, n8nAgentPipelineTimeoutMs(env), "n8n_agent_pipeline");
-          } catch (n8nError) {
-            await markN8nAgentTaskFailed(result.task, env, n8nError, ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack");
-            console.error("n8n_agent_task_failed", {
-              stage: ackSent ? "n8n_agent_after_ack" : "n8n_agent_before_ack",
-              task_id: result.task.task_id,
-              summary: n8nError instanceof Error ? n8nError.message : String(n8nError),
-            });
-          }
+          await scheduleN8nAgentPipeline(event, result, env, ctx);
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
             console.log("monitor_wake_skipped", { reason: result.task.wake_skip_reason || "wake_not_scheduled" });
