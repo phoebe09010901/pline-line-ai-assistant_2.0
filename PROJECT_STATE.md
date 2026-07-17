@@ -1,6 +1,111 @@
 # 菲比 LINE 智能助理_02｜PROJECT_STATE
 
-最後更新：2026-07-16
+最後更新：2026-07-17
+
+---
+
+# 2026-07-17 FIX｜FORMAL Gate source/config 參數化 precheck
+
+本輪 `PLine｜FIX｜小修正與命名同步` 只做 FORMAL Gate 前的 source/config 正式化參數化 precheck 與必要小修，不部署、不建立 Cloudflare 資源、不設定 secret。
+
+## 修正內容
+
+- Worker source version 已同步為 `V3.4.2`。
+- Worker `PLINE_ENVIRONMENT` / `CODEX_TASK_NAMESPACE` 可分離 TEST / FORMAL task idempotency、operation fingerprint 與 queue/status key。
+- Worker queue key 預設由 `queues/pending:${environment}:${namespace}` 推導，也可用 `CODEX_PENDING_QUEUE_KEY` 覆寫。
+- Worker executor status key 預設由 `executor-status:${environment}:${namespace}` 推導，也可用 `CODEX_EXECUTOR_STATUS_KEY` 覆寫。
+- monitor push URL 可用 `CODEX_WORKER_BASE_URL`、`CODEX_FINAL_PUSH_URL`、`CODEX_PROGRESS_PUSH_URL` 分離 TEST / FORMAL。
+- monitor runtime 目錄可用 `CODEX_INBOX_RUNTIME_DIR` 分離。
+- monitor task log 目錄可用 `CODEX_TASK_LOG_DIR` 分離。
+- idea/query path 可用 `PLINE_IDEA_DIR`、`PLINE_IDEA_DELETED_DIR`、`PLINE_QUERY_DATA_DIR` 分離。
+- wrangler 已新增 TEST vars 與 `env.formal` template；FORMAL KV id 只放 placeholder，不填 secret、不建立資源。
+- TEST monitor plist 已補齊明確 TEST env，避免只靠隱性 fallback。
+
+## 本輪邊界
+
+- 未部署 Worker。
+- 未建立 FORMAL Worker / KV / Queue / DO。
+- 未設定 Cloudflare secret。
+- 未操作 LINE Developers、n8n、FORMAL、舊專案或正式 LINE。
+- 未複製 TEST 資料成 FORMAL 資料。
+
+## 待 RELEASE / FORMAL Gate 處理
+
+- 建立或確認 FORMAL Worker 名稱與正式 route。
+- 建立 FORMAL KV namespace，替換 `REPLACE_WITH_FORMAL_KV_NAMESPACE_ID`。
+- 設定 FORMAL `LINE_CHANNEL_ACCESS_TOKEN`、allowlist、wake URL / token 等 secret。
+- 建立 FORMAL monitor plist / launchd 設定，指向 FORMAL KV、FORMAL Worker URL、FORMAL idea/query paths。
+- 重新跑 TEST regression 與 FORMAL create precheck；不得直接標 live PASS。
+
+```text
+PLine｜FIX FORMAL_CONFIG_PRECHECK_STATUS=completed_local_source_only
+WORKER_SOURCE_VERSION=V3.4.2
+DEPLOY_STATUS=not_run
+FORMAL_RESOURCE_CREATED=false
+FORMAL_ALLOWED=false
+```
+
+---
+
+# 2026-07-17 RELEASE｜階段收尾與上線檢查
+
+本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 只補 release closeout 文件與狀態索引，不做部署、重啟或 live LINE send。
+
+## Release 判定
+
+```text
+RELEASE_CLOSEOUT_STATUS=v3_4_kv_quota_throttle_recorded
+LAUNCH_DECISION=NO_GO_LIVE_RETEST_PENDING
+LIVE_TEST_STATUS=ack_only_issue_observed_retest_pending
+FORMAL_ALLOWED=false
+```
+
+## 本輪補齊
+
+- `PLine_RELEASE_CLOSEOUT_CHECK.md` 已更新為 2026-07-17 V3.4 / KV quota / live retest pending 判定。
+- `README.md` / `PLine_DOC_SPEC_INDEX.md` 已指向 NO GO / live retest pending 的 release closeout。
+- `CHANGELOG.md` / `CODEX_NOTES.md` 已補上 RELEASE 收尾紀錄與下次接手注意。
+
+## 本輪邊界
+
+- 未修改 Worker、monitor、local-query-api、n8n runtime。
+- 未部署、未重啟、未做真實 LINE 重測。
+- 未碰 FORMAL、正式 LINE、token、secret 或 credentials。
+
+---
+
+# 2026-07-17 FIX｜admin allowlist 分隔符與命名同步
+
+本輪 `PLine｜FIX｜小修正與命名同步` 只做已定位的小修正。
+
+## 修正內容
+
+- Worker source version 已同步為 `V3.4.1`。（後續 FORMAL Gate source/config precheck 已再更新為 `V3.4.2`。）
+- `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS` 解析已支援逗號、空白與換行分隔。
+- `PLINE_ALLOWED_LINE_USER_IDS` / fallback `ALLOWED_LINE_USER_IDS` 使用同一套分隔規則。
+- 命名邊界維持：LINE Developers Admin 不等於阿光管理者；阿光管理者仍以 Worker env allowlist 為準。
+
+## 本輪邊界
+
+- 本輪只修改本機 source 與文件。
+- 未更新 Cloudflare secret。
+- 未部署 Worker。
+- 未做真實 LINE 重測。
+- 未修改 n8n、FORMAL、舊專案、正式 LINE、token、secret 或 credentials。
+
+## 待後續驗收
+
+- 部署最新 source。
+- 以逗號 / 空白 / 換行多 admin allowlist 各跑一次 TEST 驗收。
+- 驗證非 admin 仍被擋，且不進 pending / processing。
+- 再回歸同一 event / task / execution / JSON / push 防重複。
+
+```text
+PLine｜FIX WORKER_STATUS: completed_local_source_only
+FORMAL_ALLOWED=false
+LIVE_LINE_TEST_STATUS=not_run
+DEPLOY_STATUS=not_run
+```
 
 ---
 
@@ -43,7 +148,7 @@
 - `列出本月想法` 今日 live 問題：只收到 ACK、沒有第二段 final；需重新驗收 / 目前不穩定。
 - `請通通幫我列出來` 曾修正並有一次 PASS，但後續整體想法列表 / 列本月仍存在 live 問題，不得整體標 PASS。
 - 非 admin 帳號可觸發私人想法操作的權限問題仍需修正；LINE Developers 兩位 Admin 不會自動等於阿光管理者。
-- 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`；多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`；本機 source 已支援逗號 / 空白 / 換行分隔，但尚未部署與 live PASS。
 - 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
 - 多 admin allowlist 尚未更新 secret；不得標 PASS。
 - 同一內容重複回覆、重複執行及重複產生 JSON 的問題仍需全鏈路修正，不得標 PASS。

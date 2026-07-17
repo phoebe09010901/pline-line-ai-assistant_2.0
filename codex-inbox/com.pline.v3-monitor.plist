@@ -17,6 +17,24 @@
     <string>kv</string>
     <key>CODEX_INBOX_KV_NAMESPACE_ID</key>
     <string>ba842d5662f94e60bfeb4a85e9f0e36c</string>
+    <key>CODEX_EXECUTOR_ENVIRONMENT</key>
+    <string>test</string>
+    <key>CODEX_TASK_NAMESPACE</key>
+    <string>default</string>
+    <key>CODEX_EXECUTOR_STATUS_KEY</key>
+    <string>executor-status:test:default</string>
+    <key>CODEX_PENDING_QUEUE_KEY</key>
+    <string>queues/pending:test:default</string>
+    <key>CODEX_WORKER_BASE_URL</key>
+    <string>https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev</string>
+    <key>PLINE_IDEA_DIR</key>
+    <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST</string>
+    <key>PLINE_IDEA_DELETED_DIR</key>
+    <string>/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除</string>
+    <key>CODEX_INBOX_RUNTIME_DIR</key>
+    <string>/Users/phoebe/Documents/菲比 LINE 智能助理_02/codex-inbox</string>
+    <key>CODEX_TASK_LOG_DIR</key>
+    <string>/tmp</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>

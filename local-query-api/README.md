@@ -10,6 +10,17 @@ npm start
 
 The default address is `http://127.0.0.1:8787`.
 
+## Config
+
+TEST defaults stay compatible with the current Dropbox-synced idea folder.
+
+- `PORT`: HTTP port. Default: `8787`.
+- `PLINE_QUERY_DATA_DIR`: query data directory override.
+- `PLINE_IDEA_DIR`: fallback query data directory when `PLINE_QUERY_DATA_DIR` is not set.
+
+For FORMAL, RELEASE must provide a FORMAL data directory through env/config.
+Do not reuse or copy the TEST Dropbox folder as FORMAL data.
+
 ## Endpoints
 
 - `GET /health`

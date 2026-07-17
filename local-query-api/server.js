@@ -3,7 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 const PORT = Number(process.env.PORT || 8787);
-const DATA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
+const DEFAULT_DATA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
+const DATA_DIR = process.env.PLINE_QUERY_DATA_DIR || process.env.PLINE_IDEA_DIR || DEFAULT_DATA_DIR;
 const FILE_PATTERN = /^idea_\d{4}-\d{2}-\d{2}_.*\.json$/;
 
 function taipeiDateParts() {

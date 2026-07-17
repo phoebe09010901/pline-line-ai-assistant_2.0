@@ -3,6 +3,28 @@ main = "src/index.js"
 compatibility_date = "2026-07-15"
 workers_dev = true
 
+[vars]
+PLINE_ENVIRONMENT = "test"
+CODEX_TASK_NAMESPACE = "default"
+CODEX_EXECUTOR_STATUS_KEY = "executor-status:test:default"
+CODEX_PENDING_QUEUE_KEY = "queues/pending:test:default"
+PLINE_WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b"
+
 [[kv_namespaces]]
 binding = "CODEX_INBOX"
 id = "ba842d5662f94e60bfeb4a85e9f0e36c"
+
+[env.formal]
+name = "pline-v2-0-formal-line-gateway"
+workers_dev = false
+
+[env.formal.vars]
+PLINE_ENVIRONMENT = "formal"
+CODEX_TASK_NAMESPACE = "default"
+CODEX_EXECUTOR_STATUS_KEY = "executor-status:formal:default"
+CODEX_PENDING_QUEUE_KEY = "queues/pending:formal:default"
+PLINE_WORKER_NAME = "pline-v2-0-formal-line-gateway"
+
+[[env.formal.kv_namespaces]]
+binding = "CODEX_INBOX"
+id = "REPLACE_WITH_FORMAL_KV_NAMESPACE_ID"

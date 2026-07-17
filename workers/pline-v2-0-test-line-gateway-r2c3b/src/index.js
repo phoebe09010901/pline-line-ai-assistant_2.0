@@ -4,10 +4,9 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4";
-const ENVIRONMENT = "test";
-const EXECUTOR_STATUS_KEY = "executor-status:test:default";
-const PENDING_QUEUE_KEY = "queues/pending:test:default";
+const WORKER_VERSION = "V3.4.2";
+const DEFAULT_ENVIRONMENT = "test";
+const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
 const EXECUTOR_OFFLINE_AFTER_MS = 600_000;
 const OPERATION_FINGERPRINT_TTL_SECONDS = 5 * 60;
@@ -72,7 +71,35 @@ function isWebhookRedelivery(event = {}) {
 }
 
 function allowlistValues(value = "") {
-  return String(value).split(",").map((item) => item.trim()).filter(Boolean);
+  return String(value).split(/[,\s]+/u).map((item) => item.trim()).filter(Boolean);
+}
+
+function runtimeEnvironment(env = {}) {
+  return env.PLINE_ENVIRONMENT || env.CODEX_EXECUTOR_ENVIRONMENT || env.CODEX_ENVIRONMENT || DEFAULT_ENVIRONMENT;
+}
+
+function taskNamespace(env = {}) {
+  return env.CODEX_TASK_NAMESPACE || env.PLINE_TASK_NAMESPACE || DEFAULT_TASK_NAMESPACE;
+}
+
+function scopedRuntimeKey(prefix, env = {}) {
+  return `${prefix}:${runtimeEnvironment(env)}:${taskNamespace(env)}`;
+}
+
+function pendingQueueKey(env = {}) {
+  return env.CODEX_PENDING_QUEUE_KEY || scopedRuntimeKey("queues/pending", env);
+}
+
+function executorStatusKey(env = {}) {
+  return env.CODEX_EXECUTOR_STATUS_KEY || scopedRuntimeKey("executor-status", env);
+}
+
+function projectName(env = {}) {
+  return env.PLINE_PROJECT_NAME || PROJECT;
+}
+
+function workerName(env = {}) {
+  return env.PLINE_WORKER_NAME || WORKER_NAME;
 }
 
 export function resolveRole(event = {}, env = {}) {
@@ -93,13 +120,15 @@ function unauthorizedReply() {
   return "我目前只接受已授權的管理者使用私人助理功能。這則訊息我不會記錄或處理。";
 }
 
-export async function idempotencyKeyForEvent(event = {}) {
+export async function idempotencyKeyForEvent(event = {}, env = {}) {
   const userId = sourceUserId(event) || "unknown-user";
   const messageId = lineMessageId(event);
   const webhookEventId = typeof event.webhookEventId === "string" ? event.webhookEventId : "";
+  const runtime = runtimeEnvironment(env);
+  const namespace = taskNamespace(env);
   const basis = messageId
-    ? `${ENVIRONMENT}:line:${userId}:${messageId}`
-    : `${ENVIRONMENT}:line:webhook:${webhookEventId || "unknown-event"}`;
+    ? `${runtime}:${namespace}:line:${userId}:${messageId}`
+    : `${runtime}:${namespace}:line:webhook:${webhookEventId || "unknown-event"}`;
   return {
     idempotency_key: basis,
     idempotency_hash: (await sha256Hex(basis)).slice(0, 32),
@@ -132,19 +161,15 @@ export function operationFingerprintParts(text = "") {
   return operation ? { operation, target: target || normalized } : null;
 }
 
-export async function operationFingerprintForTask(event = {}) {
+export async function operationFingerprintForTask(event = {}, env = {}) {
   const parts = operationFingerprintParts(event.message?.text || "");
   if (!parts) return null;
   const userId = sourceUserId(event) || "unknown-user";
-  const basis = `${ENVIRONMENT}:line:${userId}:${parts.operation}:${parts.target}`;
+  const basis = `${runtimeEnvironment(env)}:${taskNamespace(env)}:line:${userId}:${parts.operation}:${parts.target}`;
   return {
     ...parts,
     operation_fingerprint: (await sha256Hex(basis)).slice(0, 32),
   };
-}
-
-function executorStatusKey(env = {}) {
-  return env.CODEX_EXECUTOR_STATUS_KEY || EXECUTOR_STATUS_KEY;
 }
 
 function executorOfflineAfterMs(env = {}) {
@@ -247,14 +272,20 @@ function wakePlan(env = {}, request = null, queuedWhileOffline = false, createdA
 async function enqueuePendingTask(env = {}, pendingKey) {
   if (!env.CODEX_INBOX || !pendingKey) return null;
   let queuedKeys = [];
-  const raw = await env.CODEX_INBOX.get(PENDING_QUEUE_KEY, "json").catch(() => null);
+  const queueKey = pendingQueueKey(env);
+  const raw = await env.CODEX_INBOX.get(queueKey, "json").catch(() => null);
   if (Array.isArray(raw)) queuedKeys = raw;
   else if (Array.isArray(raw?.keys)) queuedKeys = raw.keys;
   queuedKeys = queuedKeys.filter((key) => typeof key === "string" && key !== pendingKey);
   queuedKeys.push(pendingKey);
   if (queuedKeys.length > PENDING_QUEUE_LIMIT) queuedKeys = queuedKeys.slice(-PENDING_QUEUE_LIMIT);
-  const payload = { keys: queuedKeys, updated_at: taipeiNow(), environment: ENVIRONMENT };
-  await env.CODEX_INBOX.put(PENDING_QUEUE_KEY, JSON.stringify(payload));
+  const payload = {
+    keys: queuedKeys,
+    updated_at: taipeiNow(),
+    environment: runtimeEnvironment(env),
+    task_namespace: taskNamespace(env),
+  };
+  await env.CODEX_INBOX.put(queueKey, JSON.stringify(payload));
   return payload;
 }
 
@@ -262,7 +293,7 @@ export async function writeInboxTask(event, env, request = null) {
   const lineEventId = typeof event.webhookEventId === "string" && event.webhookEventId
     ? event.webhookEventId
     : typeof event.replyToken === "string" ? event.replyToken : `event-${Date.now()}`;
-  const idempotency = await idempotencyKeyForEvent(event);
+  const idempotency = await idempotencyKeyForEvent(event, env);
   const id = taskIdFromIdempotency(idempotency.idempotency_hash) || taskId(event, lineEventId);
   const mode = executionMode(event.message.text);
   const displayId = displayTaskId();
@@ -289,7 +320,7 @@ export async function writeInboxTask(event, env, request = null) {
       ack_user_message: "我剛剛已經收到這則訊息了，會以同一筆任務接著處理，不會重複建立。",
     };
   }
-  const operation = await operationFingerprintForTask(event);
+  const operation = await operationFingerprintForTask(event, env);
   const operationKey = operation ? `operation-fingerprints/${operation.operation_fingerprint}` : null;
   const userId = sourceUserId(event);
   const duplicateOperation = operationKey && env.CODEX_INBOX
@@ -339,7 +370,8 @@ export async function writeInboxTask(event, env, request = null) {
     source_user_fingerprint: await shortFingerprint(userId),
     source_type: sourceType(event),
     reply_token_fingerprint: await shortFingerprint(event.replyToken || ""),
-    environment: ENVIRONMENT,
+    environment: runtimeEnvironment(env),
+    task_namespace: taskNamespace(env),
     resolved_role: auth.role,
     authorization_result: auth.authorization_result,
     authorization_checked_at: createdAt,
@@ -355,7 +387,7 @@ export async function writeInboxTask(event, env, request = null) {
     executor_last_heartbeat_at: executorStatus.last_heartbeat_at || null,
     risk_level: "unknown",
     requires_confirmation_after_offline: "unknown",
-    project: PROJECT,
+    project: projectName(env),
     version: WORKER_VERSION,
   };
 
@@ -379,7 +411,8 @@ async function recordAuthEvent(event, env, auth, idempotency) {
   const checkedAt = taipeiNow();
   const userId = sourceUserId(event);
   await env.CODEX_INBOX.put(`auth-events/${idempotency.idempotency_hash}`, JSON.stringify({
-    environment: ENVIRONMENT,
+    environment: runtimeEnvironment(env),
+    task_namespace: taskNamespace(env),
     channel: "line",
     source_user_id: userId || null,
     source_user_fingerprint: await shortFingerprint(userId),
@@ -426,7 +459,9 @@ export async function wakeMonitor(task, env = {}, request = null) {
       headers,
       body: JSON.stringify({
         event: "pending_task_created",
-        project: PROJECT,
+        project: projectName(env),
+        environment: runtimeEnvironment(env),
+        task_namespace: taskNamespace(env),
         display_task_id: task?.display_task_id || null,
         at: sentAt,
       }),
@@ -479,7 +514,15 @@ async function pushLineText(taskId, text, env, pushType = "final") {
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "GET") return json({ ok: true, worker: WORKER_NAME, version: WORKER_VERSION });
+    if (request.method === "GET") {
+      return json({
+        ok: true,
+        worker: workerName(env),
+        version: WORKER_VERSION,
+        environment: runtimeEnvironment(env),
+        task_namespace: taskNamespace(env),
+      });
+    }
     if (request.method === "POST" && new URL(request.url).pathname === "/internal/final-push") {
       let body;
       try { body = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
@@ -496,7 +539,7 @@ export default {
     for (const event of Array.isArray(payload.events) ? payload.events : []) {
       if (event?.type !== "message" || event?.message?.type !== "text" || typeof event.replyToken !== "string") continue;
       try {
-        const idempotency = await idempotencyKeyForEvent(event);
+        const idempotency = await idempotencyKeyForEvent(event, env);
         const auth = resolveRole(event, env);
         if (!isAuthorizedForPrivateTask(auth)) {
           const existingAuthEvent = env.CODEX_INBOX

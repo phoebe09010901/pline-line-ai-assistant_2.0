@@ -7,30 +7,36 @@ import { promisify } from "node:util";
 import { listIdeasForPeriod } from "./idea-tools.js";
 import { ACCOUNTING_TARGET_FILE, syncAccountingCsv } from "./accounting-tools.js";
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
-export const INBOX_ROOT = ROOT;
+const SOURCE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+export const INBOX_ROOT = path.resolve(process.env.CODEX_INBOX_RUNTIME_DIR || SOURCE_ROOT);
 const execFileAsync = promisify(execFile);
 const KV_NAMESPACE_ID = process.env.CODEX_INBOX_KV_NAMESPACE_ID || "ba842d5662f94e60bfeb4a85e9f0e36c";
-const PROJECT_ROOT = path.resolve(ROOT, "..");
-const DROPBOX_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
-const DROPBOX_DELETED_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除";
-const IDEA_TOOLS = path.join(ROOT, "idea-tools.js");
-const ACCOUNTING_TOOLS = path.join(ROOT, "accounting-tools.js");
-const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/final-push";
-const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev/internal/progress-push";
+const PROJECT_ROOT = path.resolve(SOURCE_ROOT, "..");
+const DEFAULT_IDEA_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST";
+const DEFAULT_IDEA_DELETED_DIR = "/Users/phoebe/Library/CloudStorage/Dropbox/codex專案/菲比 LINE 智能助理_02/想法紀錄_TEST_已刪除";
+const DROPBOX_DIR = process.env.PLINE_IDEA_DIR || DEFAULT_IDEA_DIR;
+const DROPBOX_DELETED_DIR = process.env.PLINE_IDEA_DELETED_DIR || DEFAULT_IDEA_DELETED_DIR;
+const IDEA_TOOLS = path.join(SOURCE_ROOT, "idea-tools.js");
+const ACCOUNTING_TOOLS = path.join(SOURCE_ROOT, "accounting-tools.js");
+const DEFAULT_WORKER_BASE_URL = "https://pline-v2-0-test-line-gateway-r2c3b.phy4175.workers.dev";
+const WORKER_BASE_URL = (process.env.CODEX_WORKER_BASE_URL || DEFAULT_WORKER_BASE_URL).replace(/\/+$/u, "");
+const FINAL_PUSH_URL = process.env.CODEX_FINAL_PUSH_URL || `${WORKER_BASE_URL}/internal/final-push`;
+const PROGRESS_PUSH_URL = process.env.CODEX_PROGRESS_PUSH_URL || `${WORKER_BASE_URL}/internal/progress-push`;
 const WAKE_HOST = process.env.CODEX_WAKE_HOST || "127.0.0.1";
 const WAKE_PORT = Number(process.env.CODEX_WAKE_PORT || 8793);
 const WAKE_TOKEN = process.env.CODEX_WAKE_TOKEN || "";
 const POLL_INTERVAL_MS = 60_000;
 const HEARTBEAT_INTERVAL_MS = Number(process.env.CODEX_EXECUTOR_HEARTBEAT_INTERVAL_MS || 300_000);
-const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || "executor-status:test:default";
-const PENDING_QUEUE_KEY = process.env.CODEX_PENDING_QUEUE_KEY || "queues/pending:test:default";
+const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || process.env.PLINE_ENVIRONMENT || "test";
+const TASK_NAMESPACE = process.env.CODEX_TASK_NAMESPACE || process.env.PLINE_TASK_NAMESPACE || "default";
+const EXECUTOR_STATUS_KEY = process.env.CODEX_EXECUTOR_STATUS_KEY || `executor-status:${EXECUTOR_ENVIRONMENT}:${TASK_NAMESPACE}`;
+const PENDING_QUEUE_KEY = process.env.CODEX_PENDING_QUEUE_KEY || `queues/pending:${EXECUTOR_ENVIRONMENT}:${TASK_NAMESPACE}`;
 const PENDING_QUEUE_LIMIT = Number(process.env.CODEX_PENDING_QUEUE_LIMIT || 200);
 const EXECUTOR_ID = process.env.CODEX_EXECUTOR_ID || "home-mac-default";
 const EXECUTOR_INSTANCE_ID = process.env.CODEX_EXECUTOR_INSTANCE_ID || `${EXECUTOR_ID}:${process.pid}`;
-const EXECUTOR_ENVIRONMENT = process.env.CODEX_EXECUTOR_ENVIRONMENT || "test";
 const MONITOR_VERSION = "V3.4";
 const EXECUTOR_STALE_AFTER_MS = Number(process.env.CODEX_EXECUTOR_STALE_AFTER_MS || 600_000);
+const TASK_LOG_DIR = process.env.CODEX_TASK_LOG_DIR || "/tmp";
 const MAX_LINE_MESSAGE_LENGTH = 5_000;
 const folders = ["pending", "processing", "completed", "failed"];
 const now = () => new Date().toISOString();
@@ -152,12 +158,12 @@ function runCodex(args, options) {
 }
 
 async function ensureFolders() {
-  for (const folder of folders) await fs.mkdir(path.join(ROOT, folder), { recursive: true });
+  for (const folder of folders) await fs.mkdir(path.join(INBOX_ROOT, folder), { recursive: true });
 }
 
 async function claimOne(file) {
-  const source = path.join(ROOT, "pending", file);
-  const processing = path.join(ROOT, "processing", file);
+  const source = path.join(INBOX_ROOT, "pending", file);
+  const processing = path.join(INBOX_ROOT, "processing", file);
   await fs.rename(source, processing);
   const task = JSON.parse(await fs.readFile(processing, "utf8"));
   task.status = "processing";
@@ -173,7 +179,7 @@ export async function scanOnce(handler = executeAndPush) {
   localScanLock = true;
   try {
     await ensureFolders();
-    const files = (await fs.readdir(path.join(ROOT, "pending"))).filter((file) => file.endsWith(".json"));
+    const files = (await fs.readdir(path.join(INBOX_ROOT, "pending"))).filter((file) => file.endsWith(".json"));
     for (const file of files) {
       let claim;
       try { claim = await claimOne(file); } catch { continue; }
@@ -189,14 +195,14 @@ export async function scanOnce(handler = executeAndPush) {
         claim.task.result_summary = claim.task.technical_summary.slice(0, 500);
         claim.task.result_status = result?.result_status || "completed";
         await fs.writeFile(claim.path, `${JSON.stringify(claim.task, null, 2)}\n`);
-        await fs.rename(claim.path, path.join(ROOT, "completed", file));
+        await fs.rename(claim.path, path.join(INBOX_ROOT, "completed", file));
       } catch (error) {
         claim.task.status = "failed";
         claim.task.failed_at = now();
         claim.task.error_summary = String(error?.message || error).slice(0, 500);
         claim.task.retryable = true;
         await fs.writeFile(claim.path, `${JSON.stringify(claim.task, null, 2)}\n`);
-        await fs.rename(claim.path, path.join(ROOT, "failed", file));
+        await fs.rename(claim.path, path.join(INBOX_ROOT, "failed", file));
       }
     }
   } finally {
@@ -622,7 +628,8 @@ async function executeWithCodex(task) {
     "最後請只輸出一個 JSON object，不要加 Markdown、不要加程式碼區塊、不要加其他文字。格式如下：",
     "{\"progress_stage\":\"已完成\",\"progress_user_message\":\"自然的進度通知\",\"technical_summary\":\"完整工程紀錄\",\"final_user_message\":\"適合直接推送 LINE 的繁體中文回覆\"}",
   ].join("\n");
-  const outputFile = path.join("/tmp", `pline-codex-${String(task.task_id).replace(/[^A-Za-z0-9_-]/g, "_")}.last`);
+  const outputFile = path.join(TASK_LOG_DIR, `pline-codex-${String(task.task_id).replace(/[^A-Za-z0-9_-]/g, "_")}.last`);
+  await fs.mkdir(TASK_LOG_DIR, { recursive: true });
   await fs.rm(outputFile, { force: true });
   const { stdout, stderr, exitCode } = await runCodex([
     "exec", "--ephemeral", "--ignore-user-config", "--sandbox", "danger-full-access", "-c", "model_reasoning_effort=low", "--cd", PROJECT_ROOT,

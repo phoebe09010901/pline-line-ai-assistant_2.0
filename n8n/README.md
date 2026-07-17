@@ -29,6 +29,8 @@ n8n/PLine_V2_0_workflow_skeleton.json
 狀態：
 
 - 已匯出目前成功的 n8n V2.0 workflow baseline
+- 2026-07-16 V3 checkpoint recheck：n8n workflow unchanged
+- 2026-07-17 V3.4 closeout recheck：n8n workflow unchanged；n8n AI Agent 仍是 planned only
 - workflow 名稱：`PLine｜菲比 LINE 智能助理｜V2.0`
 - Dropbox baseline 匯出檔已清除 credentials metadata，已檢查未包含 token、secret、credentials
 - LINE → Worker → n8n V2.0 已 PASS
@@ -45,3 +47,7 @@ n8n/PLine_V2_0_workflow_skeleton.json
 - 未修改舊專案
 
 `n8n/PLine_V2_0_workflow_skeleton.json` 是 2026-07-15 的歷史骨架，不是目前成功 baseline。
+
+V3 receive-only checkpoint 的待修正主線是 Codex 後段任務停點，不是 n8n workflow；不得因此重畫或改寫目前已 PASS 的 V2.0 Dropbox baseline。
+
+2026-07-17 V3.4 下的待修正主線是 KV quota reset 後重測、admin allowlist、防重複，以及想法列表 final 修正；不是 n8n workflow。n8n AI Agent（想法、記帳、Google Calendar）需等安全問題 PASS 後另開明確任務。

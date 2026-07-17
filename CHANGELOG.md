@@ -4,13 +4,164 @@
 
 ## 2026-07-17
 
+### FIX｜FORMAL Gate source/config 參數化 precheck
+
+本輪 `PLine｜FIX｜小修正與命名同步` 只做 FORMAL Gate 前 source/config 參數化與必要小修，未部署、未建立 FORMAL 資源、未設定 secret。
+
+修改內容：
+
+- `workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+  - Worker source version 改為 `V3.4.2`
+  - `PLINE_ENVIRONMENT` / `CODEX_TASK_NAMESPACE` 可分離 TEST / FORMAL idempotency、operation fingerprint 與回報欄位
+  - `CODEX_EXECUTOR_STATUS_KEY` / `CODEX_PENDING_QUEUE_KEY` 可覆寫；未設時依 environment / namespace 推導
+  - health response 會回傳 `environment` / `task_namespace`
+- `codex-inbox/monitor.js`
+  - `CODEX_WORKER_BASE_URL`、`CODEX_FINAL_PUSH_URL`、`CODEX_PROGRESS_PUSH_URL` 可覆寫 progress / final push endpoint
+  - `CODEX_INBOX_RUNTIME_DIR`、`CODEX_TASK_LOG_DIR` 可覆寫本機 runtime / log path
+  - `PLINE_IDEA_DIR`、`PLINE_IDEA_DELETED_DIR` 可覆寫想法資料路徑
+  - queue / executor status key 依 environment / namespace 推導，並仍支援明確 override
+- `local-query-api/server.js`
+  - `PLINE_QUERY_DATA_DIR` / `PLINE_IDEA_DIR` 可覆寫查詢資料路徑
+- `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml`
+  - 新增 TEST vars 與 `env.formal` template
+  - FORMAL KV id 只放 placeholder：`REPLACE_WITH_FORMAL_KV_NAMESPACE_ID`
+- `codex-inbox/com.pline.v3-monitor.plist`
+  - 補齊目前 TEST monitor 的顯性 env 設定
+- 文件同步：
+  - `README.md`
+  - `PROJECT_STATE.md`
+  - `BASELINE.md`
+  - `CODEX_NOTES.md`
+  - `PLine_DOC_SPEC_INDEX.md`
+  - `local-query-api/README.md`
+
+邊界：
+
+- 未部署 Worker。
+- 未建立 Cloudflare Worker / KV / Queue / DO。
+- 未設定 secret。
+- 未操作 LINE Developers、n8n、FORMAL、舊專案或正式 LINE。
+- 未複製 TEST 資料成 FORMAL 資料。
+
+驗收狀態：
+
+```text
+PLine｜FIX FORMAL_CONFIG_PRECHECK_STATUS=completed_local_source_only
+WORKER_SOURCE_VERSION=V3.4.2
+DEPLOY_STATUS=not_run
+FORMAL_RESOURCE_CREATED=false
+FORMAL_ALLOWED=false
+```
+
+---
+
+### RELEASE｜階段收尾與上線檢查
+
+本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 補齊 `PLine_RELEASE_CLOSEOUT_CHECK.md`，將 release 判定從 2026-07-16 receive-only checkpoint 更新為 V3.4 / KV quota / live retest pending 狀態。
+
+判定：
+
+```text
+RELEASE_CLOSEOUT_STATUS=v3_4_kv_quota_throttle_recorded
+LAUNCH_DECISION=NO_GO_LIVE_RETEST_PENDING
+LIVE_TEST_STATUS=ack_only_issue_observed_retest_pending
+FORMAL_ALLOWED=false
+```
+
+本輪本機檢查：
+
+- `node --check codex-inbox/monitor.js`：PASS
+- `node --check codex-inbox/idea-tools.js`：PASS
+- `node --check codex-inbox/accounting-tools.js`：PASS
+- `node --check local-query-api/server.js`：PASS
+- `node --check workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`：PASS
+- n8n baseline JSON parse：PASS
+- `git diff --check`：PASS
+
+邊界：
+
+- 未修改 Worker、monitor、local-query-api、n8n runtime。
+- 未部署、未重啟、未做 live LINE send。
+- 未碰 FORMAL、正式 LINE、token、secret 或 credentials。
+
+---
+
+### FIX｜admin allowlist 分隔符與命名同步
+
+本輪 `PLine｜FIX｜小修正與命名同步` 只做本機 source 小修正與文件命名同步。
+
+修改內容：
+
+- `workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+  - Worker source version 改為 `V3.4.1`（後續 FORMAL Gate source/config precheck 已再更新為 `V3.4.2`）
+  - `allowlistValues()` 改為支援逗號、空白與換行分隔
+  - 同步套用到 admin allowlist 與 allowed-user allowlist
+- `PROJECT_STATE.md`
+- `CODEX_NOTES.md`
+- `BASELINE.md`
+
+命名同步：
+
+- LINE Developers Admin 不等於阿光管理者。
+- 阿光管理者以 Worker env allowlist 為準。
+- env 名稱維持 `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
+
+邊界：
+
+- 未部署 Worker。
+- 未更新 Cloudflare secret。
+- 未做真實 LINE 重測。
+- 未碰 n8n、FORMAL、舊專案、正式 LINE、token、secret 或 credentials。
+- 不把本輪標成 live PASS。
+
+驗收狀態：
+
+```text
+PLine｜FIX WORKER_STATUS: completed_local_source_only
+WORKER_SOURCE_VERSION=V3.4.1
+ALLOWLIST_SEPARATORS=comma_whitespace_newline
+DEPLOY_STATUS=not_run
+LIVE_LINE_TEST_STATUS=not_run
+FORMAL_ALLOWED=false
+```
+
+---
+
+### ARCHIVE｜歷史建置紀錄補齊
+
+本輪 `PLine｜ARCHIVE｜歷史建置紀錄` 補齊 `PLine_ARCHIVE_HISTORY.md`，把歷史節點從 V3 receive-only / DOC sync 追加到 2026-07-17 closeout。
+
+更新文件：
+
+- `PLine_ARCHIVE_HISTORY.md`
+- `CHANGELOG.md`
+
+新增歷史節點：
+
+- V3.0 Codex LINE closed-loop verification
+- V3.1 阿光統一人格與自然任務回覆基準
+- V3.3 offline queue recovery / fallback poll
+- V3.4 allowlist owner admin 修正
+- 2026-07-17 closeout：KV quota / 明日修正主線
+
+邊界：
+
+- 本輪只補歷史紀錄與文件索引。
+- 未修改 Worker、monitor、n8n、Cloudflare、LINE、Dropbox、FORMAL 或 credentials。
+- V3.0 / V3.1 / V3.3 / V3.4 保留為歷史基準；2026-07-17 最新 caveat 仍不得誤標 PASS。
+
+---
+
 ### DOC｜今日專案狀態整理與 Git 收尾準備
 
 本輪 `PLine｜DOC｜文件與規格整理` 只做專案狀態整理、文件更新與 Git 收尾準備，未繼續開發新功能。
 
 更新文件：
 
+- `README.md`
 - `PROJECT_STATE.md`
+- `PLine_DOC_SPEC_INDEX.md`
+- `PLine_ARCHIVE_HISTORY.md`
 - `CHANGELOG.md`
 - `CODEX_NOTES.md`
 - `BASELINE.md`
@@ -52,7 +203,7 @@ RELEASE checkpoint：
 權限狀態：
 
 - 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
-- 多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 本機 source 已支援多 userId 逗號 / 空白 / 換行分隔，但尚未部署與 live PASS。
 - 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
 - 多 admin allowlist 尚未更新 secret；不得標 PASS。
 
@@ -90,6 +241,7 @@ LINE
 邊界：
 
 - 本輪 DOC 未修改 Worker / monitor / n8n runtime 邏輯。
+- 本輪 DOC 同步 README / DOC index / archive 入口到 2026-07-17 closeout 主線。
 - 未部署、未 commit、未 push、未刪資料。
 - 未碰 FORMAL、舊專案、正式 LINE、token、secret 或 credentials。
 

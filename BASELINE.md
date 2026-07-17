@@ -4,6 +4,53 @@
 
 ---
 
+## 2026-07-17 FORMAL Gate source/config precheck note
+
+本輪 `PLine｜FIX｜小修正與命名同步` 完成 FORMAL Gate 前的本機 source/config 參數化，不代表已建立或部署 FORMAL。
+
+可列入本機 source 事實：
+
+- Worker source version：`V3.4.2`
+- TEST 預設行為仍維持：environment `test`、task namespace `default`
+- FORMAL 可用 `PLINE_ENVIRONMENT=formal` 與 `CODEX_TASK_NAMESPACE` 分離 task idempotency / operation fingerprint
+- executor status key 可用 `CODEX_EXECUTOR_STATUS_KEY` 覆寫；未設時依 environment / namespace 推導
+- pending queue key 可用 `CODEX_PENDING_QUEUE_KEY` 覆寫；未設時依 environment / namespace 推導
+- monitor push URL 可用 `CODEX_WORKER_BASE_URL`、`CODEX_FINAL_PUSH_URL`、`CODEX_PROGRESS_PUSH_URL` 覆寫
+- monitor runtime/log path 可用 `CODEX_INBOX_RUNTIME_DIR`、`CODEX_TASK_LOG_DIR` 覆寫
+- idea/query data path 可用 `PLINE_IDEA_DIR`、`PLINE_IDEA_DELETED_DIR`、`PLINE_QUERY_DATA_DIR` 覆寫
+- wrangler 有 `env.formal` template；FORMAL KV id 仍是 placeholder
+
+不可列入 live baseline：
+
+- `V3.4.2` 已部署
+- FORMAL Worker / KV / secret / monitor 已建立
+- FORMAL LINE channel 已連接
+- FORMAL idea/query data path 已建立
+- TEST 或 FORMAL live regression 已 PASS
+
+---
+
+## 2026-07-17 FIX baseline note
+
+本輪 `PLine｜FIX｜小修正與命名同步` 只更新本機 source 與文件，不代表 live baseline 已更新。
+
+可列入本機 source 事實：
+
+- Worker source version：`V3.4.1`（後續 FORMAL Gate source/config precheck 已再更新為 `V3.4.2`）
+- admin allowlist env：`PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`
+- allowed-user allowlist env：`PLINE_ALLOWED_LINE_USER_IDS` / fallback `ALLOWED_LINE_USER_IDS`
+- allowlist 分隔符：逗號、空白、換行
+- 命名邊界：LINE Developers Admin 不等於阿光管理者；阿光管理者仍以 Worker env allowlist 為準
+
+不可列入 live baseline：
+
+- 最新 source 已部署
+- 多 admin allowlist 已真實 LINE PASS
+- 非 admin / admin Gate 已完成最新回歸
+- KV quota reset 後重測已完成
+
+---
+
 ## 2026-07-17 closeout baseline note
 
 本輪文件結論以 2026-07-17 專案收尾狀態為準，不以舊 V3.4 / V3.3 / V3.1 / V3.0 / V2 / 第一版 Dropbox baseline 或 receive-only checkpoint 作為目前結論。
@@ -39,7 +86,7 @@
 
 - LINE Developers 兩位 Admin 不會自動等於阿光管理者。
 - 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
-- 多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 本機 source 已支援多 userId 逗號 / 空白 / 換行分隔，但尚未部署與 live PASS。
 - 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
 - 多 admin allowlist 尚未更新 secret；不得標 PASS。
 

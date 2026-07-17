@@ -2,6 +2,66 @@
 
 ---
 
+# 2026-07-17 FIX｜FORMAL Gate source/config 參數化 precheck
+
+本輪只做 FORMAL Gate 前的 source/config 正式化參數化，不部署、不建立 FORMAL 資源、不設定 secret。
+
+修改重點：
+
+- Worker source version：`V3.4.2`
+- `PLINE_ENVIRONMENT` / `CODEX_TASK_NAMESPACE` 可分離 TEST / FORMAL task namespace
+- `CODEX_EXECUTOR_STATUS_KEY` / `CODEX_PENDING_QUEUE_KEY` 可明確覆寫；未設時依 environment / namespace 推導
+- `CODEX_WORKER_BASE_URL` / `CODEX_FINAL_PUSH_URL` / `CODEX_PROGRESS_PUSH_URL` 可分離 monitor push URL
+- `CODEX_INBOX_RUNTIME_DIR` / `CODEX_TASK_LOG_DIR` 可分離 monitor 本機 runtime 與 log 目錄
+- `PLINE_IDEA_DIR` / `PLINE_IDEA_DELETED_DIR` / `PLINE_QUERY_DATA_DIR` 可分離想法與查詢資料路徑
+- `workers/pline-v2-0-test-line-gateway-r2c3b/wrangler.toml` 新增 `env.formal` template；FORMAL KV id 是 placeholder
+- `codex-inbox/com.pline.v3-monitor.plist` 補齊 TEST env，讓目前 TEST monitor 設定顯性化
+
+邊界：
+
+- 未部署 Worker。
+- 未建立 FORMAL Worker / KV / Queue / DO。
+- 未設定 Cloudflare secret。
+- 未操作 LINE Developers、n8n、FORMAL、舊專案或正式 LINE。
+- 未複製 TEST 資料成 FORMAL 資料。
+
+RELEASE 後續：
+
+- 建立 FORMAL Worker / KV / secret / monitor。
+- 替換 wrangler formal KV placeholder。
+- 指定 FORMAL `CODEX_WORKER_BASE_URL`、FORMAL `CODEX_INBOX_KV_NAMESPACE_ID`、FORMAL idea/query paths。
+- commit/push 後再進 Cloudflare FORMAL create precheck，不得直接 live PASS。
+
+---
+
+# 2026-07-17 FIX｜小修正與命名同步
+
+本輪只做本機小修正與文件命名同步：
+
+- `workers/pline-v2-0-test-line-gateway-r2c3b/src/index.js`
+  - Worker source version：`V3.4.1`（後續 FORMAL Gate source/config precheck 已再更新為 `V3.4.2`）
+  - `allowlistValues()` 改為支援逗號、空白與換行分隔
+  - 適用 env：`PLINE_ADMIN_LINE_USER_IDS` / `ADMIN_LINE_USER_IDS`、`PLINE_ALLOWED_LINE_USER_IDS` / `ALLOWED_LINE_USER_IDS`
+- 文件命名同步為「阿光管理者 allowlist」
+  - LINE Developers Admin 不等於阿光管理者
+  - 阿光管理者仍以 Worker env allowlist 為準
+
+邊界：
+
+- 未部署 Worker。
+- 未更新 Cloudflare secret。
+- 未做真實 LINE 重測。
+- 未碰 n8n、FORMAL、舊專案、正式 LINE、token、secret 或 credentials。
+
+後續才可驗收：
+
+- 部署最新 source
+- 多 admin 逗號 / 空白 / 換行分隔各自 TEST
+- 非 admin 阻擋回歸
+- duplicate task / execution / final push 回歸
+
+---
+
 # 核心原則
 
 保持簡單。
@@ -29,6 +89,8 @@
 - RELEASE thread id：`019f6941-4792-7822-8a10-85208aaea800`
 - latest RELEASE turn id：`019f6d01-1aa6-7db3-851d-70e998a456a7`
 - RELEASE 未修改 dirty 檔、未部署、未重啟
+- 本輪 `PLine｜RELEASE｜階段收尾與上線檢查` 已補齊 `PLine_RELEASE_CLOSEOUT_CHECK.md`，release 判定為 `NO_GO_LIVE_RETEST_PENDING`
+- 下次若從 RELEASE 檔接手，先讀 `PROJECT_STATE.md` 的 2026-07-17 closeout，再讀 `PLine_RELEASE_CLOSEOUT_CHECK.md`
 
 ## 今日技術結論
 
@@ -46,7 +108,7 @@
 
 - V3.4 allowlist owner 修正歷史已完成，但 LINE Developers 兩位 Admin 不會自動等於阿光管理者。
 - 阿光管理者目前看 Worker env secret `PLINE_ADMIN_LINE_USER_IDS` / fallback `ADMIN_LINE_USER_IDS`。
-- 多 userId 目前只確認逗號分隔支援，newline / space 不可假定 PASS。
+- 本機 source 已支援多 userId 逗號 / 空白 / 換行分隔，但尚未部署與 live PASS。
 - 新加入 LINE Developers Admin 被擋，最可能是未加入阿光 allowlist；需後續 admin allowlist Gate。
 - 多 admin allowlist 尚未更新 secret；不得標 PASS。
 - 非 admin 帳號可觸發私人想法操作的權限問題仍需修正。

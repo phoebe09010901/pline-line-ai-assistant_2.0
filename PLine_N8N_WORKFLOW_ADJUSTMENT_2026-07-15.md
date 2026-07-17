@@ -245,3 +245,132 @@ FORMAL_ALLOWED=false
 PLine｜N8N V2.0 DROPBOX_BASELINE_STATUS: exported
 
 ORCHESTRATOR_NOTIFY: yes
+
+---
+
+# 追加：V3 checkpoint 下的 n8n workflow 調整判定
+
+日期：2026-07-16
+
+來源：`PLine｜N8N｜n8n workflow 調整`
+
+目前專案文件結論已切到 V3 mainline receive-only checkpoint；本輪不以舊 V2 / 第一版 Dropbox baseline 作為新的主線結論。
+
+本輪檢查到的 n8n baseline：
+
+```text
+n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json
+n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json
+```
+
+目前判定：
+
+```text
+N8N_WORKFLOW_JSON_CHANGED=false
+N8N_BASELINE_RECHECK=passed
+V3_MAINLINE_N8N_CHANGED=false
+FORMAL_ALLOWED=false
+```
+
+本輪只做狀態判定與文件同步，不修改已通過的 workflow JSON。
+
+原因：
+
+- V2.0 Dropbox baseline 已是已通過的綠燈流程
+- V3 receive-only checkpoint 明確記錄本輪未修改 n8n / LINE Webhook
+- 目前待修正主線是 Codex 後段任務停點，不是 n8n workflow
+- n8n 仍只保留既有成功記錄流程，不新增查詢、Codex、AI 或 FORMAL 路由
+
+本輪驗證：
+
+- `n8n/PLine_V2_0_workflow_skeleton.json` 可解析，2 nodes / 0 connections，僅為歷史 skeleton
+- `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json` 可解析，active=true，2 nodes / 1 connection
+- `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json` 可解析，active=true，4 nodes / 2 connections
+- Dropbox baseline 無 `credentials` key
+- Dropbox baseline 未檢出 authorization / bearer / access_token / refresh_token / client_secret / LINE_CHANNEL / sk- 類敏感字串
+
+本輪禁止事項仍維持：
+
+- 不重畫 workflow
+- 不修改 baseline JSON
+- 不新增 n8n 查詢路由
+- 不新增 Codex 派工路由
+- 不新增 AI 分析
+- 不碰 FORMAL
+- 不碰正式 LINE
+- 不寫入 token、secret、credentials
+- 不修改舊專案 `/Users/phoebe/Documents/菲比 LINE 智能助理`
+
+下一步交回 `PLine｜00｜總控制台`：
+
+```text
+只查明 V3 Codex 後段真實停點。
+不要把本輪 N8N 判定解讀成需要修改 n8n workflow。
+```
+
+PLine｜N8N V3 CHECKPOINT_WORKFLOW_STATUS: unchanged
+
+PLine｜N8N WORKER_STATUS: completed
+
+ORCHESTRATOR_NOTIFY: yes
+
+---
+
+# 追加：2026-07-17 V3.4 下的 n8n workflow 調整判定
+
+日期：2026-07-17
+
+來源：`PLine｜N8N｜n8n workflow 調整`
+
+本輪以 `PROJECT_STATE.md` 的 2026-07-17 closeout 為準。最新主線問題是 Cloudflare KV write quota、admin allowlist、重複執行防護，以及想法列表只 ACK 沒有第二段 final；不是 n8n workflow 失效。
+
+目前判定：
+
+```text
+N8N_WORKFLOW_JSON_CHANGED=false
+N8N_RUNTIME_CHANGE_ALLOWED=false
+N8N_AI_AGENT_STATUS=planned_only
+V2_DROPBOX_BASELINE_PROTECTED=true
+FORMAL_ALLOWED=false
+```
+
+本輪不建立、不匯入、不修改 n8n workflow。
+
+原因：
+
+- V2.0 / 第一版 Dropbox baseline 仍是受保護綠燈流程，不得因 V3.4 修正被重畫、改名、拆除或搬移。
+- 2026-07-17 待修正主線位於 Worker / KV / monitor / allowlist / duplicate guard / final message 層，不在 n8n workflow。
+- `PROJECT_STATE.md` 已明確把 n8n AI Agent 列為後續規劃，必須等安全問題 PASS 後再規劃。
+- 本輪沒有明確授權 live n8n Save / Import / Publish / Activate / Execute。
+
+本輪驗證：
+
+- `n8n/PLine_V2_0_workflow_skeleton.json` 可解析，2 nodes / 0 connections，僅為歷史 skeleton。
+- `n8n/baseline/PLine_V2.0_LINE_N8N_PASS.json` 可解析，active=true，2 nodes / 1 connection。
+- `n8n/baseline/PLine_V2.0_LINE_N8N_DROPBOX_PASS.json` 可解析，active=true，4 nodes / 2 connections。
+- baseline JSON 未檢出明顯 token / secret / credential 關鍵字。
+- `node --check` 已通過 Worker、monitor、local-query-api 三個目前相關 JS 檔。
+
+本輪禁止事項仍維持：
+
+- 不修改 live n8n。
+- 不修改 baseline JSON。
+- 不新增 n8n AI Agent、想法、記帳或 Google Calendar 路由。
+- 不新增 Codex 派工路由。
+- 不碰 FORMAL / 正式 LINE / 舊專案。
+- 不寫入 token、secret、credentials 或完整 LINE userId。
+
+下一步交回 `PLine｜00｜總控制台`：
+
+```text
+先完成 admin allowlist Gate、防重複修正、想法列表 final 修正與 quota reset 後 LINE 重測。
+以上安全問題 PASS 後，再另開明確任務規劃 n8n AI Agent：想法、記帳、Google Calendar。
+```
+
+PLine｜N8N V3.4 WORKFLOW_STATUS: unchanged
+
+PLine｜N8N AI_AGENT_STATUS: planned_only
+
+PLine｜N8N WORKER_STATUS: completed
+
+ORCHESTRATOR_NOTIFY: yes
