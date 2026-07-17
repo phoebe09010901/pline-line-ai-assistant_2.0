@@ -4,7 +4,7 @@ const QUICK_QUESTION_ACK_REPLY = "我收到問題了，馬上幫你查一下 ✨
 const LONG_TASK_REPLY = "我收到任務了，正在處理中 🛠️\n\n任務編號：{display_task_id}\n\n完成後我會再通知你。";
 const PROJECT = "菲比 LINE 智能助理_02";
 const WORKER_NAME = "pline-v2-0-test-line-gateway-r2c3b";
-const WORKER_VERSION = "V3.4.4";
+const WORKER_VERSION = "V3.4.5";
 const DEFAULT_ENVIRONMENT = "test";
 const DEFAULT_TASK_NAMESPACE = "default";
 const PENDING_QUEUE_LIMIT = 200;
@@ -714,7 +714,16 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
   const completedKey = `completed/${task.task_id}.json`;
   const failedKey = `failed/${task.task_id}.json`;
   const executionKey = `executions/${task.idempotency_hash || task.task_id}`;
-  const completedAt = taipeiNow();
+  const dispatchStartedAt = taipeiNow();
+  task.n8n_dispatch_started_at = dispatchStartedAt;
+  await env.CODEX_INBOX.put(processingKey, JSON.stringify(task)).catch(() => {});
+  await env.CODEX_INBOX.put(executionKey, JSON.stringify({
+    task_id: task.task_id,
+    idempotency_hash: task.idempotency_hash || null,
+    status: "processing",
+    executor_type: "n8n_agent",
+    started_at: dispatchStartedAt,
+  })).catch(() => {});
   try {
     const response = await fetch(webhookUrl, {
       method: "POST",
@@ -736,15 +745,17 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
     let responseBody = null;
     try { responseBody = responseText ? JSON.parse(responseText) : null; } catch { responseBody = null; }
     const finalMessage = response.ok ? n8nFinalMessage(responseBody) : "";
-    task.status = response.ok ? "completed" : "failed";
-    task.completed_at = response.ok ? completedAt : null;
-    task.failed_at = response.ok ? null : completedAt;
+    const completedAt = taipeiNow();
+    const completed = response.ok && Boolean(finalMessage);
+    task.status = completed ? "completed" : "failed";
+    task.completed_at = completed ? completedAt : null;
+    task.failed_at = completed ? null : completedAt;
     task.n8n_http_status = response.status;
     task.n8n_response_has_final = Boolean(finalMessage);
-    task.result_status = response.ok ? "completed" : "failed";
-    task.technical_summary = response.ok
+    task.result_status = completed ? "completed" : "failed";
+    task.technical_summary = completed
       ? `Routed to n8n_agent. category=${task.route_category}; http_status=${response.status}; final_message=${finalMessage ? "returned" : "not_returned"}.`
-      : `n8n_agent route failed. category=${task.route_category}; http_status=${response.status}.`;
+      : `n8n_agent route failed or did not return final message. category=${task.route_category}; http_status=${response.status}; final_message=${finalMessage ? "returned" : "not_returned"}.`;
     if (finalMessage) {
       task.final_user_message = finalMessage.slice(0, 5_000);
       const push = await pushLineText(task.task_id, task.final_user_message, env, "final");
@@ -757,7 +768,7 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
       task.final_push_status = "not_returned_by_n8n";
       task.final_push_http_status = null;
     }
-    await env.CODEX_INBOX.put(response.ok ? completedKey : failedKey, JSON.stringify(task));
+    await env.CODEX_INBOX.put(completed ? completedKey : failedKey, JSON.stringify(task));
     await env.CODEX_INBOX.delete(processingKey).catch(() => {});
     await env.CODEX_INBOX.put(executionKey, JSON.stringify({
       task_id: task.task_id,
@@ -765,6 +776,8 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
       status: task.status,
       executor_type: "n8n_agent",
       updated_at: completedAt,
+      n8n_http_status: response.status,
+      n8n_response_has_final: Boolean(finalMessage),
     }));
     await env.CODEX_INBOX.put(`idempotency/${task.idempotency_hash}`, JSON.stringify({
       task_id: task.task_id,
@@ -778,11 +791,21 @@ async function dispatchN8nAgentTask(task, env = {}, webhookUrl = "") {
     task.failed_at = failedAt;
     task.result_status = "failed";
     task.error_summary = String(error?.message || error).slice(0, 500);
+    task.n8n_http_status = null;
+    task.n8n_response_has_final = false;
+    task.final_push_status = "dispatch_failed";
     await env.CODEX_INBOX.put(failedKey, JSON.stringify(task)).catch(() => {});
     await env.CODEX_INBOX.delete(processingKey).catch(() => {});
     await env.CODEX_INBOX.put(executionKey, JSON.stringify({
       task_id: task.task_id,
       idempotency_hash: task.idempotency_hash || null,
+      status: "failed",
+      executor_type: "n8n_agent",
+      updated_at: failedAt,
+      error_summary: task.error_summary,
+    })).catch(() => {});
+    await env.CODEX_INBOX.put(`idempotency/${task.idempotency_hash}`, JSON.stringify({
+      task_id: task.task_id,
       status: "failed",
       executor_type: "n8n_agent",
       updated_at: failedAt,
@@ -837,9 +860,7 @@ export default {
           await replyToLine(event, env, result.ack_user_message);
         } else if (result.n8n_agent) {
           await replyToLine(event, env, result.task);
-          const dispatch = dispatchN8nAgentTask(result.task, env, result.webhook_url);
-          if (ctx?.waitUntil) ctx.waitUntil(dispatch);
-          else void dispatch;
+          await dispatchN8nAgentTask(result.task, env, result.webhook_url);
         } else if (!result.duplicate) {
           if (result.task.wake_status !== "scheduled") {
             console.log("monitor_wake_skipped", { reason: result.task.wake_skip_reason || "wake_not_scheduled" });
