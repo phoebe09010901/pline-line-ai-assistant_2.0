@@ -25,6 +25,17 @@ class MemoryKV {
   }
 }
 
+class HangingPipelineDebugKV extends MemoryKV {
+  async put(key, value) {
+    if (String(key).startsWith("pipeline-debug/")) return new Promise(() => {});
+    return super.put(key, value);
+  }
+}
+
+async function nextTick() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function buildEvent(overrides = {}) {
   return {
     type: "message",
@@ -56,7 +67,6 @@ async function testWriteCreatesScheduledPhase() {
   const idempotency = await idempotencyKeyForEvent(event, env);
   const task = await kv.get(`processing/${result.task.task_id}.json`, "json");
   const execution = await kv.get(`executions/${idempotency.idempotency_hash}`, "json");
-  const debug = await kv.get(`pipeline-debug/${idempotency.idempotency_hash}`, "json");
 
   assert.equal(result.n8n_agent, true);
   assert.equal(task.status, "processing");
@@ -70,9 +80,30 @@ async function testWriteCreatesScheduledPhase() {
   assert.equal(execution.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
   assert.equal(execution.pipeline_scheduled_at, task.pipeline_scheduled_at);
   assert.equal(execution.pipeline_started_at, task.pipeline_started_at);
+  await nextTick();
+  const debug = await kv.get(`pipeline-debug/${idempotency.idempotency_hash}`, "json");
   assert.equal(debug.phase, "task_created");
   assert.equal(debug.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
   assert.equal(debug.pipeline_started_at, task.pipeline_started_at);
+}
+
+async function testDebugSeedCannotBlockTaskCreation() {
+  const kv = new HangingPipelineDebugKV();
+  const env = buildEnv(kv);
+  const event = buildEvent({ webhookEventId: "evt-debug-hang-001" });
+  const result = await Promise.race([
+    writeN8nAgentTask(event, env, new Request("https://worker.example.test/callback", { method: "POST" })),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("write_n8n_agent_task_timeout")), 500)),
+  ]);
+  const idempotency = await idempotencyKeyForEvent(event, env);
+  const task = await kv.get(`processing/${result.task.task_id}.json`, "json");
+  const execution = await kv.get(`executions/${idempotency.idempotency_hash}`, "json");
+
+  assert.equal(result.n8n_agent, true);
+  assert.equal(task.n8n_pipeline_phase, "pipeline_started");
+  assert.ok(task.pipeline_schedule_intent_at);
+  assert.ok(task.pipeline_started_at);
+  assert.equal(execution.pipeline_schedule_intent_at, task.pipeline_schedule_intent_at);
 }
 
 async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
@@ -114,24 +145,26 @@ async function testLinePostSchedulesBeforeBackgroundAckCompletes() {
     const task = JSON.parse(processingEntries[0][1]);
     const execution = await kv.get(`executions/${task.idempotency_hash}`, "json");
     const debugKey = `pipeline-debug/${task.idempotency_hash}`;
-    const debugAfterSchedule = await kv.get(debugKey, "json");
     assert.notEqual(task.n8n_pipeline_phase, "pipeline_scheduled");
     assert.ok(task.pipeline_scheduled_at, "LINE POST n8n_agent route must schedule before ACK/background completion");
     assert.ok(task.pipeline_started_at, "LINE POST n8n_agent route must write pipeline_started before waitUntil background work");
     assert.notEqual(execution.phase, "pipeline_scheduled");
     assert.equal(execution.pipeline_scheduled_at, task.pipeline_scheduled_at);
     assert.equal(execution.pipeline_started_at, task.pipeline_started_at);
-    assert.ok(debugAfterSchedule.pipeline_schedule_intent_at, "n8n_agent route must write pipeline_schedule_intent_at");
-    assert.ok(debugAfterSchedule.waituntil_call_at, "n8n_agent route must write waituntil_call_at");
-    assert.ok(debugAfterSchedule.waituntil_registered_at, "n8n_agent route must write waituntil_registered_at");
-    assert.equal(debugAfterSchedule.task_key, `processing/${task.task_id}.json`);
-    assert.equal(debugAfterSchedule.execution_key, `executions/${task.idempotency_hash}`);
-    assert.equal(debugAfterSchedule.version, "V3.4.15");
+    assert.ok(task.schedule_handler_entry_at, "n8n_agent route must write schedule_handler_entry_at into task");
+    assert.ok(task.waituntil_call_at, "n8n_agent route must write waituntil_call_at into task");
+    assert.ok(task.waituntil_registered_at, "n8n_agent route must write waituntil_registered_at into task");
+    assert.equal(execution.schedule_handler_entry_at, task.schedule_handler_entry_at);
+    assert.equal(execution.waituntil_call_at, task.waituntil_call_at);
+    assert.equal(execution.waituntil_registered_at, task.waituntil_registered_at);
     for (let attempt = 0; attempt < 20 && !releaseLineAck; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await nextTick();
     }
     assert.equal(typeof releaseLineAck, "function");
+    const taskAfterEntry = await kv.get(`processing/${task.task_id}.json`, "json");
     const debugAfterEntry = await kv.get(debugKey, "json");
+    assert.ok(taskAfterEntry.pipeline_entry_at, "n8n_agent pipeline must write pipeline_entry_at into task");
+    assert.equal(debugAfterEntry.version, "V3.4.16");
     assert.ok(debugAfterEntry.pipeline_entry_at, "n8n_agent pipeline must write independent pipeline_entry_at debug key");
     const debugJson = JSON.stringify(debugAfterEntry);
     assert.equal(debugJson.includes("test-token"), false);
@@ -173,6 +206,7 @@ async function testWaitUntilErrorDiagnosticIsSanitized() {
 }
 
 await testWriteCreatesScheduledPhase();
+await testDebugSeedCannotBlockTaskCreation();
 await testLinePostSchedulesBeforeBackgroundAckCompletes();
 await testWaitUntilErrorDiagnosticIsSanitized();
 console.log("n8n-agent-schedule.test.mjs: PASS");
